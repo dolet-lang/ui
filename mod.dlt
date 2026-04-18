@@ -28,6 +28,7 @@ export ui_fill_square
 export ui_outline_rect
 export ui_line
 export ui_text
+export ui_text_bg
 export ui_clear
 export ui_mouse_create
 export ui_mouse_capture

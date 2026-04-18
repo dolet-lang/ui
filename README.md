@@ -17,7 +17,7 @@ Feature support:
 | Color | Supported | `UIColor` and `ui_rgb(...)` are available. |
 | Rect | Supported | `UIRect` is available. |
 | Canvas | Supported | `UiCanvas` is available through the GDI backend. |
-| Text | Supported | `canvas.text(...)`, `ui_text(...)`, and text draw commands are available. |
+| Text | Supported | `canvas.text(...)`, `canvas.text_bg(...)`, `ui_text(...)`, and text draw commands are available. |
 | Mouse state | Supported | `UIMouseState` tracks client position and mouse button transitions. |
 | Draw commands | Supported | `UIDrawList` records and replays clear, rect, line, and text commands. |
 | Native backend | Supported on Windows | Windows GDI is available; Linux and engine backends are planned. |
@@ -31,6 +31,7 @@ Ready today:
 - Outlined rectangles
 - Lines
 - Text drawing
+- Opaque text backgrounds for stable GDI text rendering
 - Mouse state helpers
 - Hit testing helpers
 - Basic draw command list

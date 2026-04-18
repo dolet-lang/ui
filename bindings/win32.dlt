@@ -24,5 +24,6 @@ extern lib "gdi32":
     fun LineTo(hdc: i64, x: i32, y: i32) -> i32
     fun GetStockObject(i: i32) -> i64
     fun SetTextColor(hdc: i64, color: i32) -> i32
+    fun SetBkColor(hdc: i64, color: i32) -> i32
     fun SetBkMode(hdc: i64, mode: i32) -> i32
     fun TextOutA(hdc: i64, x: i32, y: i32, lpString: i64, c: i32) -> i32
