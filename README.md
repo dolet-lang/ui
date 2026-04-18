@@ -129,13 +129,13 @@ dolet-compiler/packages/ui
 Then build a consumer file that imports `window` and `ui`:
 
 ```powershell
-C:\Users\xRo0t\Desktop\xMine\dolet` work` spaces\dolet-compiler\bin\doletc.exe app.dlt -o app --platform windows
+doletc app.dlt -o app --platform windows
 ```
 
 Run:
 
 ```powershell
-.\test_ui.exe
+.\app.exe
 ```
 
 ## Platform Notes
