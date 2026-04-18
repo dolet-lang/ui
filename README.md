@@ -17,10 +17,10 @@ Feature support:
 | Color | Supported | `UIColor` and `ui_rgb(...)` are available. |
 | Rect | Supported | `UIRect` is available. |
 | Canvas | Supported | `UiCanvas` is available through the GDI backend. |
-| Text | Not supported yet | Planned for labels, buttons, and richer widgets. |
-| Mouse state | Not supported yet | Planned for hover, click, focus, and hit testing. |
-| Draw commands | Not supported yet | Immediate drawing works today; a backend-neutral command list is planned. |
-| Native backend | Partially supported | Windows GDI is available; Linux and engine backends are planned. |
+| Text | Supported | `canvas.text(...)`, `ui_text(...)`, and text draw commands are available. |
+| Mouse state | Supported | `UIMouseState` tracks client position and mouse button transitions. |
+| Draw commands | Supported | `UIDrawList` records and replays clear, rect, line, and text commands. |
+| Native backend | Supported on Windows | Windows GDI is available; Linux and engine backends are planned. |
 
 Ready today:
 
@@ -30,18 +30,19 @@ Ready today:
 - Filled rectangles and squares
 - Outlined rectangles
 - Lines
+- Text drawing
+- Mouse state helpers
+- Hit testing helpers
+- Basic draw command list
 - Windows native GDI backend
 - Double buffering to reduce flicker
 - Works with `import window` for native Dolet windows
 
 Planned next:
 
-- Text drawing
-- Mouse state helpers
-- Hit testing helpers
 - Clipping
-- Basic draw command layer
 - Linux backend
+- Engine backends such as Kobic or Vulkan
 - Higher-level widget libraries built on top of `ui`
 
 ## Design
@@ -70,6 +71,9 @@ ui
   colors
   rectangles
   canvas
+  text
+  mouse state
+  draw commands
   native rendering backends
 
 window
@@ -86,6 +90,8 @@ This keeps `ui` reusable. A framework can use it internally, while advanced user
 mod.dlt
 module.meta
 types.dlt
+input.dlt
+commands.dlt
 
 bindings/
   win32.dlt
@@ -113,20 +119,38 @@ else:
     background: UIColor = ui_rgb(18, 22, 28)
     square_color: UIColor = ui_rgb(64, 160, 255)
     border_color: UIColor = ui_rgb(240, 245, 255)
+    accent_color: UIColor = ui_rgb(255, 88, 96)
+    hover_color: UIColor = ui_rgb(255, 130, 136)
+
+    mouse: UIMouseState = ui_mouse_create()
+    commands: UIDrawList = ui_draw_list_create(64)
 
     while win.should_close() == 0:
         win.wait_events()
+        mouse.update(win.get_handle())
 
         client_width: i32 = win.get_width()
         client_height: i32 = win.get_height()
 
+        commands.clear()
+        commands.push_clear(client_width, client_height, background)
+        commands.push_text(32, 28, "Dolet UI: text, mouse state, and draw commands", border_color)
+        commands.push_fill_rect(120, 100, 180, 180, square_color)
+        commands.push_outline_rect(120, 100, 180, 180, border_color, 3)
+
+        if mouse.is_over_xy(360, 140, 220, 120) == 1:
+            commands.push_fill_rect(360, 140, 220, 120, hover_color)
+            commands.push_text(386, 188, "hover", background)
+        else:
+            commands.push_fill_rect(360, 140, 220, 120, accent_color)
+            commands.push_text(388, 188, "move mouse here", background)
+
         canvas: UiCanvas = ui_begin_gdi(win.get_handle(), client_width, client_height)
         if canvas.is_valid() == 1:
-            canvas.clear(client_width, client_height, background)
-            canvas.fill_square(120, 100, 180, square_color)
-            canvas.outline_rect(120, 100, 180, 180, border_color, 3)
+            commands.render(canvas)
             canvas.end()
 
+    commands.destroy()
     win.destroy()
 ```
 

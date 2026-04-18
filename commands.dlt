@@ -1,0 +1,120 @@
+# ============================
+#  Backend-Neutral Draw Commands
+# ============================
+
+struct UIDrawList:
+    data: i64 = 0
+    count: i32 = 0
+    capacity: i32 = 0
+
+imple UIDrawList:
+    static fun create(capacity: i32) -> UIDrawList:
+        list: UIDrawList = UIDrawList()
+        if capacity <= 0:
+            return list
+
+        list.data = Memory.malloc_zeroed((capacity * UI_DRAW_COMMAND_SIZE) as i64)
+        if list.data == 0:
+            return list
+
+        list.count = 0
+        list.capacity = capacity
+        return list
+
+    fun destroy(self):
+        if self.data != 0:
+            Memory.free(self.data)
+        self.data = 0
+        self.count = 0
+        self.capacity = 0
+
+    fun clear(self):
+        self.count = 0
+
+    fun is_valid(self) -> i32:
+        if self.data == 0:
+            return 0
+        return 1
+
+    fun push_clear(self, width: i32, height: i32, color: UIColor):
+        self.write_command(UI_CMD_CLEAR, 0, 0, width, height, 0, 0, color, 0, "")
+
+    fun push_fill_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor):
+        self.write_command(UI_CMD_FILL_RECT, x, y, width, height, 0, 0, color, 0, "")
+
+    fun push_outline_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor, thickness: i32):
+        self.write_command(UI_CMD_OUTLINE_RECT, x, y, width, height, 0, 0, color, thickness, "")
+
+    fun push_line(self, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
+        self.write_command(UI_CMD_LINE, x1, y1, 0, 0, x2, y2, color, thickness, "")
+
+    fun push_text(self, x: i32, y: i32, value: str, color: UIColor):
+        self.write_command(UI_CMD_TEXT, x, y, 0, 0, 0, 0, color, 0, value)
+
+    fun render(self, canvas: UiCanvas):
+        if self.data == 0:
+            return
+
+        i: i32 = 0
+        base: i64 = 0
+        kind: i32 = 0
+        x: i32 = 0
+        y: i32 = 0
+        width: i32 = 0
+        height: i32 = 0
+        x2: i32 = 0
+        y2: i32 = 0
+        color: UIColor = UIColor()
+        thickness: i32 = 0
+        value: str = ""
+
+        while i < self.count:
+            base = self.command_base(i)
+            kind = Memory.read_i32(base)
+            x = Memory.read_i32(base + 4)
+            y = Memory.read_i32(base + 8)
+            width = Memory.read_i32(base + 12)
+            height = Memory.read_i32(base + 16)
+            x2 = Memory.read_i32(base + 20)
+            y2 = Memory.read_i32(base + 24)
+            color = UIColor.from_raw(Memory.read_i32(base + 28))
+            thickness = Memory.read_i32(base + 32)
+            value = Memory.read_i64(base + 40) as str
+
+            if kind == UI_CMD_CLEAR:
+                canvas.clear(width, height, color)
+            elif kind == UI_CMD_FILL_RECT:
+                canvas.fill_rect(x, y, width, height, color)
+            elif kind == UI_CMD_OUTLINE_RECT:
+                canvas.outline_rect(x, y, width, height, color, thickness)
+            elif kind == UI_CMD_LINE:
+                canvas.line(x, y, x2, y2, color, thickness)
+            elif kind == UI_CMD_TEXT:
+                canvas.text(x, y, value, color)
+
+            i = i + 1
+
+    fun write_command(self, kind: i32, x: i32, y: i32, width: i32, height: i32, x2: i32, y2: i32, color: UIColor, thickness: i32, value: str):
+        if self.data == 0:
+            return
+        if self.count >= self.capacity:
+            return
+
+        base: i64 = self.command_base(self.count)
+        Memory.write_i32(base, kind)
+        Memory.write_i32(base + 4, x)
+        Memory.write_i32(base + 8, y)
+        Memory.write_i32(base + 12, width)
+        Memory.write_i32(base + 16, height)
+        Memory.write_i32(base + 20, x2)
+        Memory.write_i32(base + 24, y2)
+        Memory.write_i32(base + 28, color.value)
+        Memory.write_i32(base + 32, thickness)
+        Memory.write_i64(base + 40, value as i64)
+        self.count = self.count + 1
+
+    fun command_base(self, index: i32) -> i64:
+        return self.data + ((index * UI_DRAW_COMMAND_SIZE) as i64)
+
+fun ui_draw_list_create(capacity: i32) -> UIDrawList:
+    return UIDrawList.create(capacity)

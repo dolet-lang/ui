@@ -5,6 +5,17 @@
 UI_PS_SOLID: i32 = 0
 UI_NULL_BRUSH: i32 = 5
 UI_SRCCOPY: i32 = 13369376
+UI_BK_TRANSPARENT: i32 = 1
+UI_MOUSE_LEFT: i32 = 1
+UI_MOUSE_RIGHT: i32 = 2
+UI_MOUSE_MIDDLE: i32 = 4
+
+UI_CMD_CLEAR: i32 = 1
+UI_CMD_FILL_RECT: i32 = 2
+UI_CMD_OUTLINE_RECT: i32 = 3
+UI_CMD_LINE: i32 = 4
+UI_CMD_TEXT: i32 = 5
+UI_DRAW_COMMAND_SIZE: i32 = 48
 
 @stack
 struct UIRect:
@@ -12,6 +23,11 @@ struct UIRect:
     top: i32 = 0
     right: i32 = 0
     bottom: i32 = 0
+
+@stack
+struct UIPoint:
+    x: i32 = 0
+    y: i32 = 0
 
 struct UIColor:
     value: i32 = 0
@@ -46,3 +62,25 @@ fun ui_make_rect(x: i32, y: i32, width: i32, height: i32) -> UIRect:
     rect.right = x + width
     rect.bottom = y + height
     return rect
+
+fun ui_rect_contains(rect: UIRect, x: i32, y: i32) -> i32:
+    if x < rect.left:
+        return 0
+    if y < rect.top:
+        return 0
+    if x >= rect.right:
+        return 0
+    if y >= rect.bottom:
+        return 0
+    return 1
+
+fun ui_rect_contains_xy(x: i32, y: i32, width: i32, height: i32, px: i32, py: i32) -> i32:
+    if px < x:
+        return 0
+    if py < y:
+        return 0
+    if px >= x + width:
+        return 0
+    if py >= y + height:
+        return 0
+    return 1

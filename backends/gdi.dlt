@@ -160,6 +160,18 @@ imple UiCanvas:
             SelectObject(self.hdc, old_pen)
         DeleteObject(pen)
 
+    fun text(self, x: i32, y: i32, value: str, color: UIColor):
+        if self.hdc == 0:
+            return
+        if Memory.strlen(value) == 0:
+            return
+
+        old_color: i32 = SetTextColor(self.hdc, color.value)
+        old_mode: i32 = SetBkMode(self.hdc, UI_BK_TRANSPARENT)
+        TextOutA(self.hdc, x, y, value as i64, Memory.strlen(value) as i32)
+        SetBkMode(self.hdc, old_mode)
+        SetTextColor(self.hdc, old_color)
+
 fun ui_begin(hwnd: i64) -> UiCanvas:
     return UiCanvas.begin(hwnd)
 
@@ -189,4 +201,9 @@ fun ui_outline_rect(hwnd: i64, x: i32, y: i32, width: i32, height: i32, color: U
 fun ui_line(hwnd: i64, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
     canvas: UiCanvas = UiCanvas.begin(hwnd)
     canvas.line(x1, y1, x2, y2, color, thickness)
+    canvas.end()
+
+fun ui_text(hwnd: i64, x: i32, y: i32, value: str, color: UIColor):
+    canvas: UiCanvas = UiCanvas.begin(hwnd)
+    canvas.text(x, y, value, color)
     canvas.end()
