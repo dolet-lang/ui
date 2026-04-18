@@ -1,0 +1,48 @@
+# ============================
+#  UI Types
+# ============================
+
+UI_PS_SOLID: i32 = 0
+UI_NULL_BRUSH: i32 = 5
+UI_SRCCOPY: i32 = 13369376
+
+@stack
+struct UIRect:
+    left: i32 = 0
+    top: i32 = 0
+    right: i32 = 0
+    bottom: i32 = 0
+
+struct UIColor:
+    value: i32 = 0
+
+imple UIColor:
+    static fun from_raw(value: i32) -> UIColor:
+        color: UIColor = UIColor()
+        color.value = value
+        return color
+
+    static fun rgb(r: i32, g: i32, b: i32) -> UIColor:
+        rr: i32 = ui_clamp_byte(r)
+        gg: i32 = ui_clamp_byte(g)
+        bb: i32 = ui_clamp_byte(b)
+        raw: i32 = (rr & 255) | ((gg & 255) << 8) | ((bb & 255) << 16)
+        return UIColor.from_raw(raw)
+
+fun ui_clamp_byte(value: i32) -> i32:
+    if value < 0:
+        return 0
+    if value > 255:
+        return 255
+    return value
+
+fun ui_rgb(r: i32, g: i32, b: i32) -> UIColor:
+    return UIColor.rgb(r, g, b)
+
+fun ui_make_rect(x: i32, y: i32, width: i32, height: i32) -> UIRect:
+    rect: UIRect = UIRect()
+    rect.left = x
+    rect.top = y
+    rect.right = x + width
+    rect.bottom = y + height
+    return rect

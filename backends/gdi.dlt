@@ -1,0 +1,192 @@
+# ============================
+#  GDI Drawing Backend
+# ============================
+
+struct UiCanvas:
+    hwnd: i64 = 0
+    hdc: i64 = 0
+    target_hdc: i64 = 0
+    bitmap: i64 = 0
+    old_bitmap: i64 = 0
+    width: i32 = 0
+    height: i32 = 0
+    buffered: i32 = 0
+
+imple UiCanvas:
+    static fun begin(hwnd: i64) -> UiCanvas:
+        canvas: UiCanvas = UiCanvas()
+        canvas.hwnd = hwnd
+        canvas.hdc = 0
+        canvas.target_hdc = 0
+        canvas.bitmap = 0
+        canvas.old_bitmap = 0
+        canvas.width = 0
+        canvas.height = 0
+        canvas.buffered = 0
+        if hwnd != 0:
+            canvas.hdc = GetDC(hwnd)
+        return canvas
+
+    static fun begin_gdi(hwnd: i64, width: i32, height: i32) -> UiCanvas:
+        canvas: UiCanvas = UiCanvas()
+        canvas.hwnd = hwnd
+        canvas.hdc = 0
+        canvas.target_hdc = 0
+        canvas.bitmap = 0
+        canvas.old_bitmap = 0
+        canvas.width = width
+        canvas.height = height
+        canvas.buffered = 0
+
+        if hwnd == 0:
+            return canvas
+
+        canvas.target_hdc = GetDC(hwnd)
+        if canvas.target_hdc == 0:
+            return canvas
+
+        if width <= 0 or height <= 0:
+            canvas.hdc = canvas.target_hdc
+            return canvas
+
+        memory_dc: i64 = CreateCompatibleDC(canvas.target_hdc)
+        if memory_dc == 0:
+            canvas.hdc = canvas.target_hdc
+            return canvas
+
+        memory_bitmap: i64 = CreateCompatibleBitmap(canvas.target_hdc, width, height)
+        if memory_bitmap == 0:
+            DeleteDC(memory_dc)
+            canvas.hdc = canvas.target_hdc
+            return canvas
+
+        canvas.old_bitmap = SelectObject(memory_dc, memory_bitmap)
+        canvas.hdc = memory_dc
+        canvas.bitmap = memory_bitmap
+        canvas.buffered = 1
+        return canvas
+
+    fun end(self):
+        if self.buffered == 1:
+            if self.target_hdc != 0 and self.hdc != 0:
+                BitBlt(self.target_hdc, 0, 0, self.width, self.height, self.hdc, 0, 0, UI_SRCCOPY)
+            if self.old_bitmap != 0 and self.hdc != 0:
+                SelectObject(self.hdc, self.old_bitmap)
+            if self.bitmap != 0:
+                DeleteObject(self.bitmap)
+            if self.hdc != 0:
+                DeleteDC(self.hdc)
+            if self.hwnd != 0 and self.target_hdc != 0:
+                ReleaseDC(self.hwnd, self.target_hdc)
+        else:
+            if self.hwnd != 0 and self.hdc != 0:
+                ReleaseDC(self.hwnd, self.hdc)
+
+        self.hdc = 0
+        self.target_hdc = 0
+        self.bitmap = 0
+        self.old_bitmap = 0
+        self.buffered = 0
+
+    fun is_valid(self) -> i32:
+        if self.hdc == 0:
+            return 0
+        return 1
+
+    fun clear(self, width: i32, height: i32, color: UIColor):
+        self.fill_rect(0, 0, width, height, color)
+
+    fun fill_square(self, x: i32, y: i32, size: i32, color: UIColor):
+        self.fill_rect(x, y, size, size, color)
+
+    fun fill_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor):
+        if self.hdc == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+
+        rect: UIRect = ui_make_rect(x, y, width, height)
+        brush: i64 = CreateSolidBrush(color.value)
+        if brush == 0:
+            return
+
+        FillRect(self.hdc, rect as i64, brush)
+        DeleteObject(brush)
+
+    fun outline_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor, thickness: i32):
+        if self.hdc == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+
+        pen_width: i32 = thickness
+        if pen_width <= 0:
+            pen_width = 1
+
+        pen: i64 = CreatePen(UI_PS_SOLID, pen_width, color.value)
+        if pen == 0:
+            return
+
+        old_pen: i64 = SelectObject(self.hdc, pen)
+        hollow_brush: i64 = GetStockObject(UI_NULL_BRUSH)
+        old_brush: i64 = 0
+        if hollow_brush != 0:
+            old_brush = SelectObject(self.hdc, hollow_brush)
+
+        Rectangle(self.hdc, x, y, x + width, y + height)
+
+        if old_brush != 0:
+            SelectObject(self.hdc, old_brush)
+        if old_pen != 0:
+            SelectObject(self.hdc, old_pen)
+        DeleteObject(pen)
+
+    fun line(self, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
+        if self.hdc == 0:
+            return
+
+        pen_width: i32 = thickness
+        if pen_width <= 0:
+            pen_width = 1
+
+        pen: i64 = CreatePen(UI_PS_SOLID, pen_width, color.value)
+        if pen == 0:
+            return
+
+        old_pen: i64 = SelectObject(self.hdc, pen)
+        MoveToEx(self.hdc, x1, y1, 0)
+        LineTo(self.hdc, x2, y2)
+        if old_pen != 0:
+            SelectObject(self.hdc, old_pen)
+        DeleteObject(pen)
+
+fun ui_begin(hwnd: i64) -> UiCanvas:
+    return UiCanvas.begin(hwnd)
+
+fun ui_begin_gdi(hwnd: i64, width: i32, height: i32) -> UiCanvas:
+    return UiCanvas.begin_gdi(hwnd, width, height)
+
+fun ui_clear(hwnd: i64, width: i32, height: i32, color: UIColor):
+    canvas: UiCanvas = UiCanvas.begin(hwnd)
+    canvas.clear(width, height, color)
+    canvas.end()
+
+fun ui_fill_rect(hwnd: i64, x: i32, y: i32, width: i32, height: i32, color: UIColor):
+    canvas: UiCanvas = UiCanvas.begin(hwnd)
+    canvas.fill_rect(x, y, width, height, color)
+    canvas.end()
+
+fun ui_fill_square(hwnd: i64, x: i32, y: i32, size: i32, color: UIColor):
+    canvas: UiCanvas = UiCanvas.begin(hwnd)
+    canvas.fill_square(x, y, size, color)
+    canvas.end()
+
+fun ui_outline_rect(hwnd: i64, x: i32, y: i32, width: i32, height: i32, color: UIColor, thickness: i32):
+    canvas: UiCanvas = UiCanvas.begin(hwnd)
+    canvas.outline_rect(x, y, width, height, color, thickness)
+    canvas.end()
+
+fun ui_line(hwnd: i64, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
+    canvas: UiCanvas = UiCanvas.begin(hwnd)
+    canvas.line(x1, y1, x2, y2, color, thickness)
+    canvas.end()

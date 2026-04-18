@@ -1,0 +1,18 @@
+# Build outputs
+*.exe
+*.obj
+*.o
+*.dll
+*.lib
+*.a
+
+# Compiler intermediates
+*.mlir
+*.ll
+
+# Local editor/system files
+.vscode/
+.idea/
+*.tmp
+Thumbs.db
+Desktop.ini
