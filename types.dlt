@@ -30,21 +30,7 @@ struct UIPoint:
     x: i32 = 0
     y: i32 = 0
 
-struct UIColor:
-    value: i32 = 0
-
-imple UIColor:
-    static fun from_raw(value: i32) -> UIColor:
-        color: UIColor = UIColor()
-        color.value = value
-        return color
-
-    static fun rgb(r: i32, g: i32, b: i32) -> UIColor:
-        rr: i32 = ui_clamp_byte(r)
-        gg: i32 = ui_clamp_byte(g)
-        bb: i32 = ui_clamp_byte(b)
-        raw: i32 = (rr & 255) | ((gg & 255) << 8) | ((bb & 255) << 16)
-        return UIColor.from_raw(raw)
+type UIColor = i32
 
 fun ui_clamp_byte(value: i32) -> i32:
     if value < 0:
@@ -54,7 +40,10 @@ fun ui_clamp_byte(value: i32) -> i32:
     return value
 
 fun ui_rgb(r: i32, g: i32, b: i32) -> UIColor:
-    return UIColor.rgb(r, g, b)
+    rr: i32 = ui_clamp_byte(r)
+    gg: i32 = ui_clamp_byte(g)
+    bb: i32 = ui_clamp_byte(b)
+    return (rr & 255) | ((gg & 255) << 8) | ((bb & 255) << 16)
 
 fun ui_make_rect(x: i32, y: i32, width: i32, height: i32) -> UIRect:
     rect: UIRect = UIRect()

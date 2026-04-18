@@ -106,7 +106,7 @@ imple UiCanvas:
             return
 
         rect: UIRect = ui_make_rect(x, y, width, height)
-        brush: i64 = CreateSolidBrush(color.value)
+        brush: i64 = CreateSolidBrush(color)
         if brush == 0:
             return
 
@@ -123,7 +123,7 @@ imple UiCanvas:
         if pen_width <= 0:
             pen_width = 1
 
-        pen: i64 = CreatePen(UI_PS_SOLID, pen_width, color.value)
+        pen: i64 = CreatePen(UI_PS_SOLID, pen_width, color)
         if pen == 0:
             return
 
@@ -149,7 +149,7 @@ imple UiCanvas:
         if pen_width <= 0:
             pen_width = 1
 
-        pen: i64 = CreatePen(UI_PS_SOLID, pen_width, color.value)
+        pen: i64 = CreatePen(UI_PS_SOLID, pen_width, color)
         if pen == 0:
             return
 
@@ -166,7 +166,7 @@ imple UiCanvas:
         if Memory.strlen(value) == 0:
             return
 
-        old_color: i32 = SetTextColor(self.hdc, color.value)
+        old_color: i32 = SetTextColor(self.hdc, color)
         old_mode: i32 = SetBkMode(self.hdc, UI_BK_TRANSPARENT)
         TextOutA(self.hdc, x, y, value as i64, Memory.strlen(value) as i32)
         SetBkMode(self.hdc, old_mode)
@@ -178,8 +178,8 @@ imple UiCanvas:
         if Memory.strlen(value) == 0:
             return
 
-        old_color: i32 = SetTextColor(self.hdc, color.value)
-        old_bg: i32 = SetBkColor(self.hdc, background.value)
+        old_color: i32 = SetTextColor(self.hdc, color)
+        old_bg: i32 = SetBkColor(self.hdc, background)
         old_mode: i32 = SetBkMode(self.hdc, UI_BK_OPAQUE)
         TextOutA(self.hdc, x, y, value as i64, Memory.strlen(value) as i32)
         SetBkMode(self.hdc, old_mode)

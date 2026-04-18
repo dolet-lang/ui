@@ -88,19 +88,19 @@ imple UIDrawList:
         return self.has_storage()
 
     fun push_clear(self, width: i32, height: i32, color: UIColor):
-        self.write_command(UI_CMD_CLEAR, 0, 0, width, height, 0, 0, color, UIColor.from_raw(0), 0, "")
+        self.write_command(UI_CMD_CLEAR, 0, 0, width, height, 0, 0, color, 0, 0, "")
 
     fun push_fill_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor):
-        self.write_command(UI_CMD_FILL_RECT, x, y, width, height, 0, 0, color, UIColor.from_raw(0), 0, "")
+        self.write_command(UI_CMD_FILL_RECT, x, y, width, height, 0, 0, color, 0, 0, "")
 
     fun push_outline_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor, thickness: i32):
-        self.write_command(UI_CMD_OUTLINE_RECT, x, y, width, height, 0, 0, color, UIColor.from_raw(0), thickness, "")
+        self.write_command(UI_CMD_OUTLINE_RECT, x, y, width, height, 0, 0, color, 0, thickness, "")
 
     fun push_line(self, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
-        self.write_command(UI_CMD_LINE, x1, y1, 0, 0, x2, y2, color, UIColor.from_raw(0), thickness, "")
+        self.write_command(UI_CMD_LINE, x1, y1, 0, 0, x2, y2, color, 0, thickness, "")
 
     fun push_text(self, x: i32, y: i32, value: str, color: UIColor):
-        self.write_command(UI_CMD_TEXT, x, y, 0, 0, 0, 0, color, UIColor.from_raw(0), 0, value)
+        self.write_command(UI_CMD_TEXT, x, y, 0, 0, 0, 0, color, 0, 0, value)
 
     fun push_text_bg(self, x: i32, y: i32, value: str, color: UIColor, background: UIColor):
         self.write_command(UI_CMD_TEXT_BG, x, y, 0, 0, 0, 0, color, background, 0, value)
@@ -119,8 +119,8 @@ imple UIDrawList:
         height: i32 = 0
         x2: i32 = 0
         y2: i32 = 0
-        color: UIColor = UIColor()
-        background: UIColor = UIColor()
+        color: UIColor = 0
+        background: UIColor = 0
         thickness: i32 = 0
         value: str = ""
 
@@ -134,8 +134,8 @@ imple UIDrawList:
             height = Memory.read_i32(self.heights + off32)
             x2 = Memory.read_i32(self.x2s + off32)
             y2 = Memory.read_i32(self.y2s + off32)
-            color = UIColor.from_raw(Memory.read_i32(self.colors + off32))
-            background = UIColor.from_raw(Memory.read_i32(self.backgrounds + off32))
+            color = Memory.read_i32(self.colors + off32)
+            background = Memory.read_i32(self.backgrounds + off32)
             thickness = Memory.read_i32(self.thicknesses + off32)
             value = Memory.read_i64(self.texts + off64) as str
 
@@ -169,8 +169,8 @@ imple UIDrawList:
         Memory.write_i32(self.heights + off32, height)
         Memory.write_i32(self.x2s + off32, x2)
         Memory.write_i32(self.y2s + off32, y2)
-        Memory.write_i32(self.colors + off32, color.value)
-        Memory.write_i32(self.backgrounds + off32, background.value)
+        Memory.write_i32(self.colors + off32, color)
+        Memory.write_i32(self.backgrounds + off32, background)
         Memory.write_i32(self.thicknesses + off32, thickness)
         Memory.write_i64(self.texts + off64, value as i64)
         self.count = self.count + 1
