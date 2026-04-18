@@ -17,7 +17,6 @@ UI_CMD_OUTLINE_RECT: i32 = 3
 UI_CMD_LINE: i32 = 4
 UI_CMD_TEXT: i32 = 5
 UI_CMD_TEXT_BG: i32 = 6
-UI_DRAW_COMMAND_SIZE: i32 = 56
 
 @stack
 struct UIRect:

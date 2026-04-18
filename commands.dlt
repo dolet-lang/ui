@@ -3,7 +3,17 @@
 # ============================
 
 struct UIDrawList:
-    data: i64 = 0
+    kinds: i64 = 0
+    xs: i64 = 0
+    ys: i64 = 0
+    widths: i64 = 0
+    heights: i64 = 0
+    x2s: i64 = 0
+    y2s: i64 = 0
+    colors: i64 = 0
+    backgrounds: i64 = 0
+    thicknesses: i64 = 0
+    texts: i64 = 0
     count: i32 = 0
     capacity: i32 = 0
 
@@ -13,18 +23,61 @@ imple UIDrawList:
         if capacity <= 0:
             return list
 
-        list.data = Memory.malloc_zeroed((capacity * UI_DRAW_COMMAND_SIZE) as i64)
-        if list.data == 0:
-            return list
-
+        list.kinds = Memory.malloc_zeroed(capacity * 4)
+        list.xs = Memory.malloc_zeroed(capacity * 4)
+        list.ys = Memory.malloc_zeroed(capacity * 4)
+        list.widths = Memory.malloc_zeroed(capacity * 4)
+        list.heights = Memory.malloc_zeroed(capacity * 4)
+        list.x2s = Memory.malloc_zeroed(capacity * 4)
+        list.y2s = Memory.malloc_zeroed(capacity * 4)
+        list.colors = Memory.malloc_zeroed(capacity * 4)
+        list.backgrounds = Memory.malloc_zeroed(capacity * 4)
+        list.thicknesses = Memory.malloc_zeroed(capacity * 4)
+        list.texts = Memory.malloc_zeroed(capacity * 8)
         list.count = 0
         list.capacity = capacity
+
+        if list.has_storage() == 0:
+            list.destroy()
+            return UIDrawList()
+
         return list
 
     fun destroy(self):
-        if self.data != 0:
-            Memory.free(self.data)
-        self.data = 0
+        if self.kinds != 0:
+            Memory.free(self.kinds)
+        if self.xs != 0:
+            Memory.free(self.xs)
+        if self.ys != 0:
+            Memory.free(self.ys)
+        if self.widths != 0:
+            Memory.free(self.widths)
+        if self.heights != 0:
+            Memory.free(self.heights)
+        if self.x2s != 0:
+            Memory.free(self.x2s)
+        if self.y2s != 0:
+            Memory.free(self.y2s)
+        if self.colors != 0:
+            Memory.free(self.colors)
+        if self.backgrounds != 0:
+            Memory.free(self.backgrounds)
+        if self.thicknesses != 0:
+            Memory.free(self.thicknesses)
+        if self.texts != 0:
+            Memory.free(self.texts)
+
+        self.kinds = 0
+        self.xs = 0
+        self.ys = 0
+        self.widths = 0
+        self.heights = 0
+        self.x2s = 0
+        self.y2s = 0
+        self.colors = 0
+        self.backgrounds = 0
+        self.thicknesses = 0
+        self.texts = 0
         self.count = 0
         self.capacity = 0
 
@@ -32,9 +85,7 @@ imple UIDrawList:
         self.count = 0
 
     fun is_valid(self) -> i32:
-        if self.data == 0:
-            return 0
-        return 1
+        return self.has_storage()
 
     fun push_clear(self, width: i32, height: i32, color: UIColor):
         self.write_command(UI_CMD_CLEAR, 0, 0, width, height, 0, 0, color, UIColor.from_raw(0), 0, "")
@@ -55,11 +106,12 @@ imple UIDrawList:
         self.write_command(UI_CMD_TEXT_BG, x, y, 0, 0, 0, 0, color, background, 0, value)
 
     fun render(self, canvas: UiCanvas):
-        if self.data == 0:
+        if self.has_storage() == 0:
             return
 
         i: i32 = 0
-        base: i64 = 0
+        off32: i64 = 0
+        off64: i64 = 0
         kind: i32 = 0
         x: i32 = 0
         y: i32 = 0
@@ -73,18 +125,19 @@ imple UIDrawList:
         value: str = ""
 
         while i < self.count:
-            base = self.command_base(i)
-            kind = Memory.read_i32(base)
-            x = Memory.read_i32(base + 4)
-            y = Memory.read_i32(base + 8)
-            width = Memory.read_i32(base + 12)
-            height = Memory.read_i32(base + 16)
-            x2 = Memory.read_i32(base + 20)
-            y2 = Memory.read_i32(base + 24)
-            color = UIColor.from_raw(Memory.read_i32(base + 28))
-            background = UIColor.from_raw(Memory.read_i32(base + 32))
-            thickness = Memory.read_i32(base + 36)
-            value = Memory.read_i64(base + 48) as str
+            off32 = self.offset_i32(i)
+            off64 = self.offset_i64(i)
+            kind = Memory.read_i32(self.kinds + off32)
+            x = Memory.read_i32(self.xs + off32)
+            y = Memory.read_i32(self.ys + off32)
+            width = Memory.read_i32(self.widths + off32)
+            height = Memory.read_i32(self.heights + off32)
+            x2 = Memory.read_i32(self.x2s + off32)
+            y2 = Memory.read_i32(self.y2s + off32)
+            color = UIColor.from_raw(Memory.read_i32(self.colors + off32))
+            background = UIColor.from_raw(Memory.read_i32(self.backgrounds + off32))
+            thickness = Memory.read_i32(self.thicknesses + off32)
+            value = Memory.read_i64(self.texts + off64) as str
 
             if kind == UI_CMD_CLEAR:
                 canvas.clear(width, height, color)
@@ -102,27 +155,58 @@ imple UIDrawList:
             i = i + 1
 
     fun write_command(self, kind: i32, x: i32, y: i32, width: i32, height: i32, x2: i32, y2: i32, color: UIColor, background: UIColor, thickness: i32, value: str):
-        if self.data == 0:
+        if self.has_storage() == 0:
             return
         if self.count >= self.capacity:
             return
 
-        base: i64 = self.command_base(self.count)
-        Memory.write_i32(base, kind)
-        Memory.write_i32(base + 4, x)
-        Memory.write_i32(base + 8, y)
-        Memory.write_i32(base + 12, width)
-        Memory.write_i32(base + 16, height)
-        Memory.write_i32(base + 20, x2)
-        Memory.write_i32(base + 24, y2)
-        Memory.write_i32(base + 28, color.value)
-        Memory.write_i32(base + 32, background.value)
-        Memory.write_i32(base + 36, thickness)
-        Memory.write_i64(base + 48, value as i64)
+        off32: i64 = self.offset_i32(self.count)
+        off64: i64 = self.offset_i64(self.count)
+        Memory.write_i32(self.kinds + off32, kind)
+        Memory.write_i32(self.xs + off32, x)
+        Memory.write_i32(self.ys + off32, y)
+        Memory.write_i32(self.widths + off32, width)
+        Memory.write_i32(self.heights + off32, height)
+        Memory.write_i32(self.x2s + off32, x2)
+        Memory.write_i32(self.y2s + off32, y2)
+        Memory.write_i32(self.colors + off32, color.value)
+        Memory.write_i32(self.backgrounds + off32, background.value)
+        Memory.write_i32(self.thicknesses + off32, thickness)
+        Memory.write_i64(self.texts + off64, value as i64)
         self.count = self.count + 1
 
-    fun command_base(self, index: i32) -> i64:
-        return self.data + ((index * UI_DRAW_COMMAND_SIZE) as i64)
+    fun has_storage(self) -> i32:
+        if self.capacity <= 0:
+            return 0
+        if self.kinds == 0:
+            return 0
+        if self.xs == 0:
+            return 0
+        if self.ys == 0:
+            return 0
+        if self.widths == 0:
+            return 0
+        if self.heights == 0:
+            return 0
+        if self.x2s == 0:
+            return 0
+        if self.y2s == 0:
+            return 0
+        if self.colors == 0:
+            return 0
+        if self.backgrounds == 0:
+            return 0
+        if self.thicknesses == 0:
+            return 0
+        if self.texts == 0:
+            return 0
+        return 1
+
+    fun offset_i32(self, index: i32) -> i64:
+        return (index * 4) as i64
+
+    fun offset_i64(self, index: i32) -> i64:
+        return (index * 8) as i64
 
 fun ui_draw_list_create(capacity: i32) -> UIDrawList:
     return UIDrawList.create(capacity)
