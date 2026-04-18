@@ -10,6 +10,18 @@ The current implementation targets Windows through a Win32/GDI backend with doub
 
 This library is early-stage but usable for basic native drawing.
 
+Feature support:
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Color | Supported | `UIColor` and `ui_rgb(...)` are available. |
+| Rect | Supported | `UIRect` is available. |
+| Canvas | Supported | `UiCanvas` is available through the GDI backend. |
+| Text | Not supported yet | Planned for labels, buttons, and richer widgets. |
+| Mouse state | Not supported yet | Planned for hover, click, focus, and hit testing. |
+| Draw commands | Not supported yet | Immediate drawing works today; a backend-neutral command list is planned. |
+| Native backend | Partially supported | Windows GDI is available; Linux and engine backends are planned. |
+
 Ready today:
 
 - `UIColor` and `ui_rgb(...)`
