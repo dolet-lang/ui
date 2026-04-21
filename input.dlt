@@ -29,22 +29,25 @@ imple UIMouseState:
         return mouse
 
     fun update(self, hwnd: i64):
+        # Snapshot previous
         self.previous_x = self.x
         self.previous_y = self.y
         self.previous_left_down = self.left_down
         self.previous_right_down = self.right_down
         self.previous_middle_down = self.middle_down
 
-        point: UIPoint = UIPoint()
-        if GetCursorPos(point as i64) != 0:
-            if hwnd != 0:
-                ScreenToClient(hwnd, point as i64)
-            self.x = point.x
-            self.y = point.y
+        # Client-space coords come from window (pure delegation — no
+        # extern lib declarations in the ui package).
+        if hwnd != 0:
+            self.x = window_client_mouse_x(hwnd)
+            self.y = window_client_mouse_y(hwnd)
 
-        self.left_down = ui_key_is_down(UI_MOUSE_LEFT)
-        self.right_down = ui_key_is_down(UI_MOUSE_RIGHT)
-        self.middle_down = ui_key_is_down(UI_MOUSE_MIDDLE)
+        # Button state comes from the input package. mouse_pressed() is
+        # the "is currently held" query; MOUSE_LEFT/RIGHT/MIDDLE constants
+        # come from input too.
+        self.left_down = mouse_pressed(MOUSE_LEFT)
+        self.right_down = mouse_pressed(MOUSE_RIGHT)
+        self.middle_down = mouse_pressed(MOUSE_MIDDLE)
 
     fun left_pressed(self) -> i32:
         if self.left_down == 1 and self.previous_left_down == 0:
@@ -81,12 +84,6 @@ imple UIMouseState:
 
     fun is_over_xy(self, x: i32, y: i32, width: i32, height: i32) -> i32:
         return ui_rect_contains_xy(x, y, width, height, self.x, self.y)
-
-fun ui_key_is_down(key: i32) -> i32:
-    state: i16 = GetAsyncKeyState(key)
-    if state < 0:
-        return 1
-    return 0
 
 fun ui_mouse_create() -> UIMouseState:
     return UIMouseState.create()

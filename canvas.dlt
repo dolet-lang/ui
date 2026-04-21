@@ -1,34 +1,13 @@
 # ============================
 #  Draw — Canvas (software framebuffer)
 # ============================
-# Pure Memory.write_i32 drawing — zero OS calls except the one present step.
+# Pure Memory.write_i32 drawing — ZERO Win32 externs in this file.
 # Works on bare metal (swap in a physical framebuffer address) or Windows
-# (malloc a buffer, blit via SetDIBitsToDevice).
+# (the window package blits via window_present_framebuffer when end() is
+# called).
 #
 # All drawing is inlined inside DrawCanvas methods to avoid a DLT sret
 # codegen bug when struct-returning calls appear inside imple methods.
-
-extern lib "user32":
-    fun GetDC(hWnd: i64) -> i64
-    fun ReleaseDC(hWnd: i64, hDC: i64) -> i32
-
-extern lib "gdi32":
-    fun SetDIBitsToDevice(hdc: i64, xDest: i32, yDest: i32, w: i32, h: i32, xSrc: i32, ySrc: i32, StartScan: i32, cLines: i32, pvBits: i64, pbmi: i64, ColorUse: i32) -> i32
-
-@stack
-struct DrawBmi:
-    biSize:          i32 = 40
-    biWidth:         i32 = 0
-    biHeight:        i32 = 0
-    biPlanes:        i16 = 1
-    biBitCount:      i16 = 32
-    biCompression:   i32 = 0
-    biSizeImage:     i32 = 0
-    biXPelsPerMeter: i32 = 0
-    biYPelsPerMeter: i32 = 0
-    biClrUsed:       i32 = 0
-    biClrImportant:  i32 = 0
-    bmiColors:       i32 = 0
 
 struct DrawCanvas:
     hwnd:        i64 = 0 as i64
@@ -61,23 +40,73 @@ fun draw_isqrt(n: i32) -> i32:
         y = (x + n / x) / 2
     return x
 
+# Fractional integer sqrt in Q8.8 fixed point: returns floor(sqrt(n) * 256).
+# Used for the sub-pixel coverage math in AA circle edges.
+fun draw_isqrt_q8(n: i32) -> i32:
+    if n <= 0:
+        return 0
+    big: i32 = n * 65536
+    # Newton on the scaled value (big) — result is sqrt(n)*256.
+    x: i32 = big
+    y: i32 = (x + 1) / 2
+    while y < x:
+        x = y
+        y = (x + big / x) / 2
+    return x
+
 imple DrawCanvas:
     fun is_valid(self) -> i32:
         return self.fb_valid
 
+    # Alpha-blend one pixel. alpha is 0..255 (0 = fully transparent,
+    # 255 = fully opaque). Honours bounds and the clip rect. Used by
+    # the AA line / circle primitives — not intended for hot loops
+    # that don't need transparency (use Memory.write_i32 directly).
+    fun blend_pixel(self, x: i32, y: i32, color: DrawColor, alpha: i32):
+        if self.fb_valid == 0:
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        if x < zero:
+            return
+        if y < zero:
+            return
+        if x >= self.width:
+            return
+        if y >= self.height:
+            return
+        if self.clip_active == 1:
+            if x < self.clip_x:
+                return
+            if y < self.clip_y:
+                return
+            if x >= self.clip_x + self.clip_w:
+                return
+            if y >= self.clip_y + self.clip_h:
+                return
+        if alpha <= zero:
+            return
+        addr: i64 = self.fb_data + (y as i64) * (self.fb_pitch as i64) + (x as i64) * 4
+        if alpha >= 255:
+            Memory.write_i32(addr, color)
+            return
+        dst: i32 = Memory.read_i32(addr)
+        sb: i32 = color & 255
+        sg: i32 = (color >> 8) & 255
+        sr: i32 = (color >> 16) & 255
+        db: i32 = dst & 255
+        dg: i32 = (dst >> 8) & 255
+        dr: i32 = (dst >> 16) & 255
+        inv: i32 = 255 - alpha
+        ob: i32 = (sb * alpha + db * inv) / 255
+        og: i32 = (sg * alpha + dg * inv) / 255
+        ored: i32 = (sr * alpha + dr * inv) / 255
+        Memory.write_i32(addr, (ob & 255) | ((og & 255) << 8) | ((ored & 255) << 16) | (255 << 24))
+
     fun end(self):
         if self.fb_valid == 0:
             return
-        hdc: i64 = GetDC(self.hwnd)
-        if hdc != 0:
-            bmi: DrawBmi = DrawBmi()
-            bmi.biSize = 40
-            bmi.biWidth = self.width
-            bmi.biHeight = self.fb_valid - self.fb_valid - self.height
-            bmi.biPlanes = 1
-            bmi.biBitCount = 32
-            SetDIBitsToDevice(hdc, self.fb_valid - self.fb_valid, self.fb_valid - self.fb_valid, self.width, self.height, self.fb_valid - self.fb_valid, self.fb_valid - self.fb_valid, self.fb_valid - self.fb_valid, self.height, self.fb_data, bmi as i64, self.fb_valid - self.fb_valid)
-            ReleaseDC(self.hwnd, hdc)
+        # Delegate the GDI blit to window — ui stays platform-free.
+        window_present_framebuffer(self.hwnd, self.fb_data, self.width, self.height, self.fb_pitch)
         Memory.free(self.fb_data)
         if self.font != 0:
             fonts_basic_free(self.font)
@@ -171,8 +200,108 @@ imple DrawCanvas:
         t: i32 = thickness
         if t <= 0:
             t = zero + 1
+
+        # ------------------------------------------------------------
+        # Thick lines: draw a t×t block at each Bresenham step. AA on
+        # thick lines is rarely useful visually and much more expensive.
+        # ------------------------------------------------------------
+        if t > 1:
+            self._line_thick(x1, y1, x2, y2, color, t)
+            return
+
+        # ------------------------------------------------------------
+        # Thin (1-px) line: Wu's anti-aliased algorithm.
+        # Walk the major axis in integer steps; for each step, write
+        # two pixels whose alpha sums to 1 (fractional coverage).
+        # ------------------------------------------------------------
+        dx_s: i32 = x2 - x1
+        dy_s: i32 = y2 - y1
+        adx: i32 = dx_s
+        if adx < zero:
+            adx = zero - adx
+        ady: i32 = dy_s
+        if ady < zero:
+            ady = zero - ady
+
+        # Horizontal / vertical → no AA needed; fall back to fill_rect.
+        if ady == zero:
+            xa: i32 = x1
+            xb: i32 = x2
+            if xa > xb:
+                xa = x2
+                xb = x1
+            self.fill_rect(xa, y1, xb - xa + 1, 1, color)
+            return
+        if adx == zero:
+            ya: i32 = y1
+            yb: i32 = y2
+            if ya > yb:
+                ya = y2
+                yb = y1
+            self.fill_rect(x1, ya, 1, yb - ya + 1, color)
+            return
+
+        # Pick the major axis (the one we step 1 pixel at a time).
+        # adx >= ady  → step in x; adx < ady → step in y.
+        if adx >= ady:
+            # X-major
+            xa: i32 = x1
+            ya: i32 = y1
+            xb: i32 = x2
+            yb: i32 = y2
+            if xa > xb:
+                xa = x2
+                ya = y2
+                xb = x1
+                yb = y1
+            # gradient in Q8 — how much y advances per one x step
+            grad: i32 = ((yb - ya) * 256) / (xb - xa)
+            yq: i32 = ya * 256             # current y in Q8
+            xi: i32 = xa
+            yi: i32 = zero
+            frac: i32 = zero
+            while xi <= xb:
+                yi = yq / 256
+                frac = yq - yi * 256
+                if frac < zero:
+                    frac = frac + 256
+                    yi = yi - 1
+                self.blend_pixel(xi, yi,     color, 255 - frac)
+                self.blend_pixel(xi, yi + 1, color, frac)
+                yq = yq + grad
+                xi = xi + 1
+        else:
+            # Y-major
+            xa: i32 = x1
+            ya: i32 = y1
+            xb: i32 = x2
+            yb: i32 = y2
+            if ya > yb:
+                xa = x2
+                ya = y2
+                xb = x1
+                yb = y1
+            grad: i32 = ((xb - xa) * 256) / (yb - ya)
+            xq: i32 = xa * 256
+            yi: i32 = ya
+            xi: i32 = zero
+            frac: i32 = zero
+            while yi <= yb:
+                xi = xq / 256
+                frac = xq - xi * 256
+                if frac < zero:
+                    frac = frac + 256
+                    xi = xi - 1
+                self.blend_pixel(xi,     yi, color, 255 - frac)
+                self.blend_pixel(xi + 1, yi, color, frac)
+                xq = xq + grad
+                yi = yi + 1
+
+    # Internal: thick Bresenham line (block at each step). Called by
+    # line() when thickness > 1.
+    fun _line_thick(self, x1: i32, y1: i32, x2: i32, y2: i32, color: DrawColor, t: i32):
+        zero: i32 = self.fb_valid - self.fb_valid
         half: i32 = t / 2
-        # Clip rect bounds (full canvas if clip inactive)
         cmin_x: i32 = zero
         cmin_y: i32 = zero
         cmax_x: i32 = self.width
@@ -204,21 +333,16 @@ imple DrawCanvas:
         tx: i32 = zero
         ty: i32 = zero
         while done == 0:
-            if t == 1:
-                if cx >= cmin_x and cy >= cmin_y and cx < cmax_x and cy < cmax_y:
-                    Memory.write_i32(self.fb_data + (cy as i64) * (self.fb_pitch as i64) + (cx as i64) * 4, color)
-            else:
-                # Thick: write a t×t block centered on the Bresenham point
-                ty = zero
-                while ty < t:
-                    py = cy - half + ty
-                    tx = zero
-                    while tx < t:
-                        px = cx - half + tx
-                        if px >= cmin_x and py >= cmin_y and px < cmax_x and py < cmax_y:
-                            Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
-                        tx = tx + 1
-                    ty = ty + 1
+            ty = zero
+            while ty < t:
+                py = cy - half + ty
+                tx = zero
+                while tx < t:
+                    px = cx - half + tx
+                    if px >= cmin_x and py >= cmin_y and px < cmax_x and py < cmax_y:
+                        Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                    tx = tx + 1
+                ty = ty + 1
             if cx == x2 and cy == y2:
                 done = zero + 1
             else:
@@ -344,6 +468,10 @@ imple DrawCanvas:
 
     # ----- Circle (filled) — scanline using isqrt -----
 
+    # Anti-aliased scanline fill. For each row y, computes the exact
+    # fractional edge position using draw_isqrt_q8 (Q8.8 fixed point)
+    # and blends the two edge pixels with coverage alpha so the arc
+    # boundary doesn't show a staircase.
     fun fill_circle(self, cx: i32, cy: i32, radius: i32, color: DrawColor):
         if self.fb_valid == 0:
             return
@@ -352,13 +480,27 @@ imple DrawCanvas:
         zero: i32 = self.fb_valid - self.fb_valid
         r2: i32 = radius * radius
         y: i32 = zero - radius
-        span: i32 = zero
+        span_q: i32 = zero          # sqrt(r² - y²) * 256
+        span_int: i32 = zero
+        frac: i32 = zero
         while y <= radius:
-            span = draw_isqrt(r2 - y * y)
-            self.fill_rect(cx - span, cy + y, 2 * span + 1, 1, color)
+            span_q = draw_isqrt_q8(r2 - y * y)
+            span_int = span_q / 256
+            frac = span_q - span_int * 256
+            # Opaque interior
+            if span_int > 0:
+                self.fill_rect(cx - span_int + 1, cy + y, 2 * span_int - 1, 1, color)
+            # Two edge pixels, alpha = frac (0..255)
+            self.blend_pixel(cx - span_int,     cy + y, color, frac)
+            self.blend_pixel(cx + span_int,     cy + y, color, frac)
+            # The innermost "opaque" edge pixels also get blended to cover
+            # the boundary where frac rounds down — fully opaque
+            if span_int > 0:
+                self.blend_pixel(cx - span_int + 1, cy + y, color, 255)
+                self.blend_pixel(cx + span_int - 1, cy + y, color, 255)
             y = y + 1
 
-    # ----- Circle (outline) — annulus between two radii -----
+    # ----- Circle (outline) — AA annulus between outer and inner radii -----
 
     fun outline_circle(self, cx: i32, cy: i32, radius: i32, color: DrawColor, thickness: i32):
         if self.fb_valid == 0:
@@ -376,18 +518,40 @@ imple DrawCanvas:
         r2: i32 = radius * radius
         ir2: i32 = inner * inner
         y: i32 = zero - radius
-        outer_span: i32 = zero
-        inner_span: i32 = zero
+        outer_q: i32 = zero
+        outer_i: i32 = zero
+        outer_f: i32 = zero
+        inner_q: i32 = zero
+        inner_i: i32 = zero
+        inner_f: i32 = zero
         while y <= radius:
-            outer_span = draw_isqrt(r2 - y * y)
+            outer_q = draw_isqrt_q8(r2 - y * y)
+            outer_i = outer_q / 256
+            outer_f = outer_q - outer_i * 256
             if y >= (zero - inner) and y <= inner:
-                inner_span = draw_isqrt(ir2 - y * y)
-                # Left and right strips of the annulus at this row
-                self.fill_rect(cx - outer_span, cy + y, outer_span - inner_span, 1, color)
-                self.fill_rect(cx + inner_span + 1, cy + y, outer_span - inner_span, 1, color)
+                inner_q = draw_isqrt_q8(ir2 - y * y)
+                inner_i = inner_q / 256
+                inner_f = inner_q - inner_i * 256
+                # Opaque ring: [inner_i+1 .. outer_i-1] on both sides
+                left_start: i32 = cx - outer_i + 1
+                left_w: i32 = outer_i - inner_i - 1
+                if left_w > 0:
+                    self.fill_rect(left_start, cy + y, left_w, 1, color)
+                right_start: i32 = cx + inner_i + 1
+                right_w: i32 = outer_i - inner_i - 1
+                if right_w > 0:
+                    self.fill_rect(right_start, cy + y, right_w, 1, color)
+                # AA edges on outer and inner
+                self.blend_pixel(cx - outer_i, cy + y, color, outer_f)
+                self.blend_pixel(cx + outer_i, cy + y, color, outer_f)
+                self.blend_pixel(cx - inner_i, cy + y, color, 255 - inner_f)
+                self.blend_pixel(cx + inner_i, cy + y, color, 255 - inner_f)
             else:
-                # This row is inside the ring only — full horizontal strip
-                self.fill_rect(cx - outer_span, cy + y, 2 * outer_span + 1, 1, color)
+                # This row is fully inside the ring (no inner hole at this y)
+                if outer_i > 0:
+                    self.fill_rect(cx - outer_i + 1, cy + y, 2 * outer_i - 1, 1, color)
+                self.blend_pixel(cx - outer_i, cy + y, color, outer_f)
+                self.blend_pixel(cx + outer_i, cy + y, color, outer_f)
             y = y + 1
 
     # ----- Rounded rect (filled) -----

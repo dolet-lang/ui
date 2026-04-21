@@ -7,10 +7,10 @@
 module ui
 import window
 import fonts
+import input
 
 load ui/types
 load ui/color
-load ui/bindings/win32
 load ui/canvas
 load ui/input
 load ui/commands
@@ -22,7 +22,6 @@ export UIMouseState
 export UIDrawList
 export DrawColor
 export DrawCanvas
-export DrawBmi
 export ui_rgb
 export ui_rect_contains
 export ui_rect_contains_xy
