@@ -422,6 +422,10 @@ imple DrawCanvas:
             yy = yy + 1
 
     # ----- Rounded rect (outline) -----
+    #
+    # Draws 4 straight edges plus 4 quarter-arcs at the corners.
+    # To get clean quarter-arcs we temporarily clip to each corner quadrant
+    # and draw a full outline_circle — only the corner slice survives the clip.
 
     fun outline_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: DrawColor, thickness: i32):
         if self.fb_valid == 0:
@@ -439,25 +443,40 @@ imple DrawCanvas:
             r = width / 2
         if r > height / 2:
             r = height / 2
-        # If thickness >= r, the rounded corners just look like filled pie slices.
-        # Simpler: fill the whole rounded rect with color, then cut out the inner
-        # rounded rect with a smaller radius. But we'd need a background color.
-        # Pragmatic approach: draw outline as two solid rounded rects layered.
-        # This requires knowing background, so for now fall back to straight outline
-        # plus filled corner arcs.
-        # Straight segments (respecting corner offset)
-        self.fill_rect(x + r, y, width - 2 * r, t, color)                                   # top
-        self.fill_rect(x + r, y + height - t, width - 2 * r, t, color)                      # bottom
-        self.fill_rect(x, y + r, t, height - 2 * r, color)                                  # left
-        self.fill_rect(x + width - t, y + r, t, height - 2 * r, color)                      # right
-        # Corner arcs — draw as thick outline_circle sectors by drawing filled
-        # annulus rings inside each corner rect, clipped by the corner quadrant.
-        # We approximate by drawing 4 small outline_circles whose bounding box
-        # overlaps the relevant corner.
+
+        # Save outer clip so we can layer ours on top and restore after.
+        saved_x: i32 = self.clip_x
+        saved_y: i32 = self.clip_y
+        saved_w: i32 = self.clip_w
+        saved_h: i32 = self.clip_h
+        saved_a: i32 = self.clip_active
+
+        # Straight edges (inset by radius so they don't overlap corner arcs)
+        self.fill_rect(x + r, y, width - 2 * r, t, color)                # top
+        self.fill_rect(x + r, y + height - t, width - 2 * r, t, color)   # bottom
+        self.fill_rect(x, y + r, t, height - 2 * r, color)               # left
+        self.fill_rect(x + width - t, y + r, t, height - 2 * r, color)   # right
+
+        # Corner quadrants. Each clip is exactly the radius-sized box
+        # containing one corner, so only that quadrant of the full
+        # outline_circle remains.
+        self.set_clip(x, y, r, r)
         self.outline_circle(x + r, y + r, r, color, t)
+
+        self.set_clip(x + width - r, y, r, r)
         self.outline_circle(x + width - r - 1, y + r, r, color, t)
+
+        self.set_clip(x, y + height - r, r, r)
         self.outline_circle(x + r, y + height - r - 1, r, color, t)
+
+        self.set_clip(x + width - r, y + height - r, r, r)
         self.outline_circle(x + width - r - 1, y + height - r - 1, r, color, t)
+
+        # Restore previous clip state
+        if saved_a == 1:
+            self.set_clip(saved_x, saved_y, saved_w, saved_h)
+        else:
+            self.clear_clip()
 
 fun draw_begin(hwnd: i64, width: i32, height: i32) -> DrawCanvas:
     canvas: DrawCanvas = draw_canvas_empty(hwnd)
