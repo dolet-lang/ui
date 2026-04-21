@@ -2,27 +2,22 @@
 #  UI Types
 # ============================
 
-UI_PS_SOLID: i32 = 0
-UI_NULL_BRUSH: i32 = 5
-UI_SRCCOPY: i32 = 13369376
-UI_BK_TRANSPARENT: i32 = 1
-UI_BK_OPAQUE: i32 = 2
-UI_MOUSE_LEFT: i32 = 1
-UI_MOUSE_RIGHT: i32 = 2
+UI_MOUSE_LEFT:   i32 = 1
+UI_MOUSE_RIGHT:  i32 = 2
 UI_MOUSE_MIDDLE: i32 = 4
 
-UI_CMD_CLEAR: i32 = 1
-UI_CMD_FILL_RECT: i32 = 2
+UI_CMD_CLEAR:       i32 = 1
+UI_CMD_FILL_RECT:   i32 = 2
 UI_CMD_OUTLINE_RECT: i32 = 3
-UI_CMD_LINE: i32 = 4
-UI_CMD_TEXT: i32 = 5
-UI_CMD_TEXT_BG: i32 = 6
+UI_CMD_LINE:        i32 = 4
+UI_CMD_TEXT:        i32 = 5
+UI_CMD_TEXT_BG:     i32 = 6
 
 @stack
 struct UIRect:
-    left: i32 = 0
-    top: i32 = 0
-    right: i32 = 0
+    left:   i32 = 0
+    top:    i32 = 0
+    right:  i32 = 0
     bottom: i32 = 0
 
 @stack
@@ -43,7 +38,7 @@ fun ui_rgb(r: i32, g: i32, b: i32) -> UIColor:
     rr: i32 = ui_clamp_byte(r)
     gg: i32 = ui_clamp_byte(g)
     bb: i32 = ui_clamp_byte(b)
-    return (rr & 255) | ((gg & 255) << 8) | ((bb & 255) << 16)
+    return (bb & 255) | ((gg & 255) << 8) | ((rr & 255) << 16) | (255 << 24)
 
 fun ui_make_rect(x: i32, y: i32, width: i32, height: i32) -> UIRect:
     rect: UIRect = UIRect()

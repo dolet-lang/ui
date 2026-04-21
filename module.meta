@@ -1,25 +1,20 @@
 # UI Module Metadata
-# Native Win32/GDI drawing helpers for Dolet.
+# Pure software rendering via draw framebuffer.
 
 [info]
 name = ui
-version = 0.1.0
-description = Native Win32/GDI immediate-mode UI drawing primitives
-
-[libs]
-# No bundled native libraries. Uses Windows system DLL import libraries.
-
-[dlls]
-# No runtime DLLs to copy. Uses user32.dll and gdi32.dll from Windows.
+version = 0.2.0
+description = Native UI drawing library — pure software renderer via draw
 
 [dependencies]
 window = optional
+fonts
 
 [link.windows]
 system_libs = user32, gdi32
 
 [link.linux]
-# Planned later. Keep disabled until the Linux backend is ready.
-
-[link.macos]
 # Planned later.
+
+[link.baremetal]
+# No system libs needed.

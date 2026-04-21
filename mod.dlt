@@ -1,14 +1,16 @@
 # ============================
 #  Dolet Native UI Library
 # ============================
-# Immediate-mode 2D drawing on top of the Win32 API/GDI.
-# Usage:
-#   import window
-#   import ui
+# Pure software rendering via draw.
+# Drawing: zero OS calls (draw framebuffer).
+# Present: 3 OS calls/frame (draw_win32_present).
 module ui
+import window
+import fonts
+
 load ui/types
 load ui/bindings/win32
-load ui/backends/gdi
+load ui/backends/draw
 load ui/input
 load ui/commands
 

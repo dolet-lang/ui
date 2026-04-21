@@ -1,29 +1,8 @@
 # ============================
-#  Win32/GDI Bindings
+#  Win32 Input Bindings
 # ============================
 
 extern lib "user32":
-    fun GetDC(hWnd: i64) -> i64
-    fun ReleaseDC(hWnd: i64, hDC: i64) -> i32
-    fun FillRect(hDC: i64, lprc: i64, hbr: i64) -> i32
     fun GetCursorPos(lpPoint: i64) -> i32
     fun ScreenToClient(hWnd: i64, lpPoint: i64) -> i32
     fun GetAsyncKeyState(vKey: i32) -> i16
-
-extern lib "gdi32":
-    fun CreateCompatibleDC(hdc: i64) -> i64
-    fun CreateCompatibleBitmap(hdc: i64, cx: i32, cy: i32) -> i64
-    fun DeleteDC(hdc: i64) -> i32
-    fun BitBlt(hdc: i64, x: i32, y: i32, cx: i32, cy: i32, hdcSrc: i64, x1: i32, y1: i32, rop: i32) -> i32
-    fun CreateSolidBrush(color: i32) -> i64
-    fun CreatePen(fnPenStyle: i32, nWidth: i32, crColor: i32) -> i64
-    fun SelectObject(hdc: i64, h: i64) -> i64
-    fun DeleteObject(hObject: i64) -> i32
-    fun Rectangle(hdc: i64, left: i32, top: i32, right: i32, bottom: i32) -> i32
-    fun MoveToEx(hdc: i64, x: i32, y: i32, lpPoint: i64) -> i32
-    fun LineTo(hdc: i64, x: i32, y: i32) -> i32
-    fun GetStockObject(i: i32) -> i64
-    fun SetTextColor(hdc: i64, color: i32) -> i32
-    fun SetBkColor(hdc: i64, color: i32) -> i32
-    fun SetBkMode(hdc: i64, mode: i32) -> i32
-    fun TextOutA(hdc: i64, x: i32, y: i32, lpString: i64, c: i32) -> i32

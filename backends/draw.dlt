@@ -1,0 +1,239 @@
+# ============================
+#  Draw Backend for UI
+# ============================
+# Inlined drawing to work around DLT sret bug on struct-returning calls
+# inside imple methods. Pure Memory.write_i32 — zero OS calls except present.
+
+extern lib "user32":
+    fun GetDC(hWnd: i64) -> i64
+    fun ReleaseDC(hWnd: i64, hDC: i64) -> i32
+
+extern lib "gdi32":
+    fun SetDIBitsToDevice(hdc: i64, xDest: i32, yDest: i32, w: i32, h: i32, xSrc: i32, ySrc: i32, StartScan: i32, cLines: i32, pvBits: i64, pbmi: i64, ColorUse: i32) -> i32
+
+@stack
+struct UiBmi:
+    biSize:          i32 = 40
+    biWidth:         i32 = 0
+    biHeight:        i32 = 0
+    biPlanes:        i16 = 1
+    biBitCount:      i16 = 32
+    biCompression:   i32 = 0
+    biSizeImage:     i32 = 0
+    biXPelsPerMeter: i32 = 0
+    biYPelsPerMeter: i32 = 0
+    biClrUsed:       i32 = 0
+    biClrImportant:  i32 = 0
+    bmiColors:       i32 = 0
+
+struct UiCanvas:
+    hwnd:     i64 = 0 as i64
+    fb_data:  i64 = 0 as i64
+    width:    i32 = 0
+    height:   i32 = 0
+    fb_pitch: i32 = 0
+    fb_valid: i32 = 0
+    font:     i64 = 0 as i64
+
+fun ui_canvas_empty(hwnd: i64) -> UiCanvas:
+    return UiCanvas(hwnd=hwnd, fb_data=hwnd, width=0, height=0, fb_pitch=0, fb_valid=0, font=hwnd)
+
+imple UiCanvas:
+    fun is_valid(self) -> i32:
+        return self.fb_valid
+
+    fun end(self):
+        if self.fb_valid == 0:
+            return
+        hdc: i64 = GetDC(self.hwnd)
+        if hdc != 0:
+            bmi: UiBmi = UiBmi()
+            bmi.biSize = 40
+            bmi.biWidth = self.width
+            bmi.biHeight = self.fb_valid - self.fb_valid - self.height
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            SetDIBitsToDevice(hdc, self.fb_valid - self.fb_valid, self.fb_valid - self.fb_valid, self.width, self.height, self.fb_valid - self.fb_valid, self.fb_valid - self.fb_valid, self.fb_valid - self.fb_valid, self.height, self.fb_data, bmi as i64, self.fb_valid - self.fb_valid)
+            ReleaseDC(self.hwnd, hdc)
+        Memory.free(self.fb_data)
+        if self.font != 0:
+            fonts_basic_free(self.font)
+        self.fb_data = self.fb_valid as i64 - self.fb_valid as i64
+        self.font = self.fb_valid as i64 - self.fb_valid as i64
+        self.fb_valid = self.fb_valid - self.fb_valid
+
+    fun clear(self, width: i32, height: i32, color: UIColor):
+        if self.fb_valid == 0:
+            return
+        y: i32 = self.fb_valid - self.fb_valid
+        x: i32 = self.fb_valid - self.fb_valid
+        row: i64 = self.fb_valid as i64 - self.fb_valid as i64
+        while y < self.height:
+            row = self.fb_data + (y as i64) * (self.fb_pitch as i64)
+            x = self.fb_valid - self.fb_valid
+            while x < self.width:
+                Memory.write_i32(row + (x as i64) * 4, color)
+                x = x + 1
+            y = y + 1
+
+    fun fill_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor):
+        if self.fb_valid == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+        start_x: i32 = x
+        start_y: i32 = y
+        end_x: i32 = x + width
+        end_y: i32 = y + height
+        zero: i32 = self.fb_valid - self.fb_valid
+        if start_x < zero:
+            start_x = zero
+        if start_y < zero:
+            start_y = zero
+        if end_x > self.width:
+            end_x = self.width
+        if end_y > self.height:
+            end_y = self.height
+        yy: i32 = start_y
+        xx: i32 = zero
+        row: i64 = zero as i64
+        while yy < end_y:
+            row = self.fb_data + (yy as i64) * (self.fb_pitch as i64)
+            xx = start_x
+            while xx < end_x:
+                Memory.write_i32(row + (xx as i64) * 4, color)
+                xx = xx + 1
+            yy = yy + 1
+
+    fun fill_square(self, x: i32, y: i32, size: i32, color: UIColor):
+        self.fill_rect(x, y, size, size, color)
+
+    fun outline_rect(self, x: i32, y: i32, width: i32, height: i32, color: UIColor, thickness: i32):
+        if self.fb_valid == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+        one: i32 = self.fb_valid - self.fb_valid + 1
+        self.fill_rect(x, y, width, one, color)
+        self.fill_rect(x, y + height - one, width, one, color)
+        self.fill_rect(x, y, one, height, color)
+        self.fill_rect(x + width - one, y, one, height, color)
+
+    fun line(self, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
+        if self.fb_valid == 0:
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        dx: i32 = x2 - x1
+        dy: i32 = y2 - y1
+        if dx < zero:
+            dx = zero - dx
+        if dy < zero:
+            dy = zero - dy
+        sx: i32 = zero + 1
+        if x1 >= x2:
+            sx = zero - 1
+        sy: i32 = zero + 1
+        if y1 >= y2:
+            sy = zero - 1
+        err: i32 = dx - dy
+        e2: i32 = zero
+        cx: i32 = x1
+        cy: i32 = y1
+        done: i32 = zero
+        while done == 0:
+            if cx >= zero and cy >= zero and cx < self.width and cy < self.height:
+                Memory.write_i32(self.fb_data + (cy as i64) * (self.fb_pitch as i64) + (cx as i64) * 4, color)
+            if cx == x2 and cy == y2:
+                done = zero + 1
+            else:
+                e2 = 2 * err
+                if e2 > (zero - dy):
+                    err = err - dy
+                    cx = cx + sx
+                if e2 < dx:
+                    err = err + dx
+                    cy = cy + sy
+
+    fun text(self, x: i32, y: i32, value: str, color: UIColor):
+        if self.fb_valid == 0:
+            return
+        if self.font == 0:
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        text_ptr: i64 = value as i64
+        length: i32 = Memory.strlen(value) as i32
+        i: i32 = zero
+        ch: i32 = zero
+        glyph_index: i32 = zero
+        base: i64 = zero as i64
+        row_byte: i32 = zero
+        rx: i32 = zero
+        ry: i32 = zero
+        px: i32 = zero
+        py: i32 = zero
+        while i < length:
+            ch = Memory.read_i8(text_ptr + (i as i64)) & 255
+            glyph_index = ch - 32
+            if glyph_index >= zero and glyph_index < 95:
+                base = self.font + (glyph_index as i64) * 8
+                ry = zero
+                while ry < 8:
+                    row_byte = Memory.read_i8(base + (ry as i64)) & 255
+                    rx = zero
+                    while rx < 8:
+                        if (row_byte & (128 >> rx)) != 0:
+                            px = x + i * 8 + rx
+                            py = y + ry
+                            if px >= zero and py >= zero and px < self.width and py < self.height:
+                                Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                        rx = rx + 1
+                    ry = ry + 1
+            i = i + 1
+
+    fun text_bg(self, x: i32, y: i32, value: str, color: UIColor, background: UIColor):
+        if self.fb_valid == 0:
+            return
+        length: i32 = Memory.strlen(value) as i32
+        self.fill_rect(x, y, length * 8, 8, background)
+        self.text(x, y, value, color)
+
+fun ui_begin(hwnd: i64) -> UiCanvas:
+    return ui_canvas_empty(hwnd)
+
+fun ui_begin_gdi(hwnd: i64, width: i32, height: i32) -> UiCanvas:
+    canvas: UiCanvas = ui_canvas_empty(hwnd)
+    canvas.width = width
+    canvas.height = height
+    if hwnd == 0 or width <= 0 or height <= 0:
+        return canvas
+    size: i64 = (width as i64) * (height as i64) * 4
+    data: i64 = Memory.malloc(size)
+    if data == 0:
+        return canvas
+    canvas.fb_data = data
+    canvas.fb_pitch = width * 4
+    canvas.font = Memory.malloc_zeroed(95 * 8)
+    fonts_basic_populate(canvas.font)
+    canvas.fb_valid = 1
+    return canvas
+
+fun ui_clear(hwnd: i64, width: i32, height: i32, color: UIColor):
+    return
+
+fun ui_fill_rect(hwnd: i64, x: i32, y: i32, width: i32, height: i32, color: UIColor):
+    return
+
+fun ui_fill_square(hwnd: i64, x: i32, y: i32, size: i32, color: UIColor):
+    return
+
+fun ui_outline_rect(hwnd: i64, x: i32, y: i32, width: i32, height: i32, color: UIColor, thickness: i32):
+    return
+
+fun ui_line(hwnd: i64, x1: i32, y1: i32, x2: i32, y2: i32, color: UIColor, thickness: i32):
+    return
+
+fun ui_text(hwnd: i64, x: i32, y: i32, value: str, color: UIColor):
+    return
+
+fun ui_text_bg(hwnd: i64, x: i32, y: i32, value: str, color: UIColor, background: UIColor):
+    return

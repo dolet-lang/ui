@@ -34,7 +34,7 @@ imple UIDrawList:
         list.backgrounds = Memory.malloc_zeroed(capacity * 4)
         list.thicknesses = Memory.malloc_zeroed(capacity * 4)
         list.texts = Memory.malloc_zeroed(capacity * 8)
-        list.count = 0
+        list.count = capacity - capacity
         list.capacity = capacity
 
         if list.has_storage() == 0:
@@ -78,11 +78,11 @@ imple UIDrawList:
         self.backgrounds = 0
         self.thicknesses = 0
         self.texts = 0
-        self.count = 0
-        self.capacity = 0
+        self.count = self.count - self.count
+        self.capacity = self.capacity - self.capacity
 
     fun clear(self):
-        self.count = 0
+        self.count = self.count - self.count
 
     fun is_valid(self) -> i32:
         return self.has_storage()
