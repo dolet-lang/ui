@@ -457,19 +457,21 @@ imple DrawCanvas:
         self.fill_rect(x, y + r, t, height - 2 * r, color)               # left
         self.fill_rect(x + width - t, y + r, t, height - 2 * r, color)   # right
 
-        # Corner quadrants. Each clip is exactly the radius-sized box
-        # containing one corner, so only that quadrant of the full
-        # outline_circle remains.
-        self.set_clip(x, y, r, r)
+        # Corner quadrants. Each clip is the radius-sized box containing
+        # one corner (extended by 1px inward on the sides that meet the
+        # straight edges, so the arc and edge pixels touch cleanly with
+        # no 1px notch). A full outline_circle is drawn; only the corner
+        # quadrant plus the 1px seam survives the clip.
+        self.set_clip(x, y, r + 1, r + 1)
         self.outline_circle(x + r, y + r, r, color, t)
 
-        self.set_clip(x + width - r, y, r, r)
+        self.set_clip(x + width - r - 1, y, r + 1, r + 1)
         self.outline_circle(x + width - r - 1, y + r, r, color, t)
 
-        self.set_clip(x, y + height - r, r, r)
+        self.set_clip(x, y + height - r - 1, r + 1, r + 1)
         self.outline_circle(x + r, y + height - r - 1, r, color, t)
 
-        self.set_clip(x + width - r, y + height - r, r, r)
+        self.set_clip(x + width - r - 1, y + height - r - 1, r + 1, r + 1)
         self.outline_circle(x + width - r - 1, y + height - r - 1, r, color, t)
 
         # Restore previous clip state
