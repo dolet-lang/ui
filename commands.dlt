@@ -105,6 +105,24 @@ imple UIDrawList:
     fun push_text_bg(self, x: i32, y: i32, value: str, color: UIColor, background: UIColor):
         self.write_command(UI_CMD_TEXT_BG, x, y, 0, 0, 0, 0, color, background, 0, value)
 
+    fun push_fill_circle(self, cx: i32, cy: i32, radius: i32, color: UIColor):
+        self.write_command(UI_CMD_FILL_CIRCLE, cx, cy, radius, 0, 0, 0, color, 0, 0, "")
+
+    fun push_outline_circle(self, cx: i32, cy: i32, radius: i32, color: UIColor, thickness: i32):
+        self.write_command(UI_CMD_OUTLINE_CIRCLE, cx, cy, radius, 0, 0, 0, color, 0, thickness, "")
+
+    fun push_fill_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: UIColor):
+        self.write_command(UI_CMD_FILL_ROUNDED_RECT, x, y, width, height, radius, 0, color, 0, 0, "")
+
+    fun push_outline_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: UIColor, thickness: i32):
+        self.write_command(UI_CMD_OUTLINE_ROUNDED_RECT, x, y, width, height, radius, 0, color, 0, thickness, "")
+
+    fun push_clip(self, x: i32, y: i32, width: i32, height: i32):
+        self.write_command(UI_CMD_CLIP_PUSH, x, y, width, height, 0, 0, 0, 0, 0, "")
+
+    fun pop_clip(self):
+        self.write_command(UI_CMD_CLIP_POP, 0, 0, 0, 0, 0, 0, 0, 0, 0, "")
+
     fun render(self, canvas: DrawCanvas):
         if self.has_storage() == 0:
             return
@@ -151,6 +169,18 @@ imple UIDrawList:
                 canvas.text(x, y, value, color)
             elif kind == UI_CMD_TEXT_BG:
                 canvas.text_bg(x, y, value, color, background)
+            elif kind == UI_CMD_FILL_CIRCLE:
+                canvas.fill_circle(x, y, width, color)
+            elif kind == UI_CMD_OUTLINE_CIRCLE:
+                canvas.outline_circle(x, y, width, color, thickness)
+            elif kind == UI_CMD_FILL_ROUNDED_RECT:
+                canvas.fill_rounded_rect(x, y, width, height, x2, color)
+            elif kind == UI_CMD_OUTLINE_ROUNDED_RECT:
+                canvas.outline_rounded_rect(x, y, width, height, x2, color, thickness)
+            elif kind == UI_CMD_CLIP_PUSH:
+                canvas.set_clip(x, y, width, height)
+            elif kind == UI_CMD_CLIP_POP:
+                canvas.clear_clip()
 
             i = i + 1
 

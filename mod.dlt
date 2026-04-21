@@ -32,3 +32,16 @@ export ui_draw_list_create
 export draw_rgb
 export draw_rgba
 export draw_begin
+export draw_isqrt
+export UI_CMD_CLEAR
+export UI_CMD_FILL_RECT
+export UI_CMD_OUTLINE_RECT
+export UI_CMD_LINE
+export UI_CMD_TEXT
+export UI_CMD_TEXT_BG
+export UI_CMD_FILL_CIRCLE
+export UI_CMD_OUTLINE_CIRCLE
+export UI_CMD_FILL_ROUNDED_RECT
+export UI_CMD_OUTLINE_ROUNDED_RECT
+export UI_CMD_CLIP_PUSH
+export UI_CMD_CLIP_POP

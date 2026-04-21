@@ -6,12 +6,18 @@ UI_MOUSE_LEFT:   i32 = 1
 UI_MOUSE_RIGHT:  i32 = 2
 UI_MOUSE_MIDDLE: i32 = 4
 
-UI_CMD_CLEAR:       i32 = 1
-UI_CMD_FILL_RECT:   i32 = 2
-UI_CMD_OUTLINE_RECT: i32 = 3
-UI_CMD_LINE:        i32 = 4
-UI_CMD_TEXT:        i32 = 5
-UI_CMD_TEXT_BG:     i32 = 6
+UI_CMD_CLEAR:                i32 = 1
+UI_CMD_FILL_RECT:            i32 = 2
+UI_CMD_OUTLINE_RECT:         i32 = 3
+UI_CMD_LINE:                 i32 = 4
+UI_CMD_TEXT:                 i32 = 5
+UI_CMD_TEXT_BG:              i32 = 6
+UI_CMD_FILL_CIRCLE:          i32 = 7
+UI_CMD_OUTLINE_CIRCLE:       i32 = 8
+UI_CMD_FILL_ROUNDED_RECT:    i32 = 9
+UI_CMD_OUTLINE_ROUNDED_RECT: i32 = 10
+UI_CMD_CLIP_PUSH:            i32 = 11
+UI_CMD_CLIP_POP:             i32 = 12
 
 @stack
 struct UIRect:

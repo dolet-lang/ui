@@ -31,16 +31,35 @@ struct DrawBmi:
     bmiColors:       i32 = 0
 
 struct DrawCanvas:
-    hwnd:     i64 = 0 as i64
-    fb_data:  i64 = 0 as i64
-    width:    i32 = 0
-    height:   i32 = 0
-    fb_pitch: i32 = 0
-    fb_valid: i32 = 0
-    font:     i64 = 0 as i64
+    hwnd:        i64 = 0 as i64
+    fb_data:     i64 = 0 as i64
+    width:       i32 = 0
+    height:      i32 = 0
+    fb_pitch:    i32 = 0
+    fb_valid:    i32 = 0
+    font:        i64 = 0 as i64
+    clip_x:      i32 = 0
+    clip_y:      i32 = 0
+    clip_w:      i32 = 0
+    clip_h:      i32 = 0
+    clip_active: i32 = 0
+    font_medium: i64 = 0 as i64
 
 fun draw_canvas_empty(hwnd: i64) -> DrawCanvas:
-    return DrawCanvas(hwnd=hwnd, fb_data=hwnd, width=0, height=0, fb_pitch=0, fb_valid=0, font=hwnd)
+    return DrawCanvas(hwnd=hwnd, fb_data=hwnd, width=0, height=0, fb_pitch=0, fb_valid=0, font=hwnd, clip_x=0, clip_y=0, clip_w=0, clip_h=0, clip_active=0, font_medium=hwnd)
+
+# ----- Integer helpers -----
+
+# Integer square root via Newton's method. Returns floor(sqrt(n)).
+fun draw_isqrt(n: i32) -> i32:
+    if n <= 0:
+        return 0
+    x: i32 = n
+    y: i32 = (x + 1) / 2
+    while y < x:
+        x = y
+        y = (x + n / x) / 2
+    return x
 
 imple DrawCanvas:
     fun is_valid(self) -> i32:
@@ -98,6 +117,18 @@ imple DrawCanvas:
             end_x = self.width
         if end_y > self.height:
             end_y = self.height
+        # Intersect with clip rect if active
+        if self.clip_active == 1:
+            if start_x < self.clip_x:
+                start_x = self.clip_x
+            if start_y < self.clip_y:
+                start_y = self.clip_y
+            cx_end: i32 = self.clip_x + self.clip_w
+            cy_end: i32 = self.clip_y + self.clip_h
+            if end_x > cx_end:
+                end_x = cx_end
+            if end_y > cy_end:
+                end_y = cy_end
         yy: i32 = start_y
         xx: i32 = zero
         row: i64 = zero as i64
@@ -117,16 +148,40 @@ imple DrawCanvas:
             return
         if width <= 0 or height <= 0:
             return
-        one: i32 = self.fb_valid - self.fb_valid + 1
-        self.fill_rect(x, y, width, one, color)
-        self.fill_rect(x, y + height - one, width, one, color)
-        self.fill_rect(x, y, one, height, color)
-        self.fill_rect(x + width - one, y, one, height, color)
+        t: i32 = thickness
+        if t <= 0:
+            t = self.fb_valid - self.fb_valid + 1
+        # If thickness covers the whole rect, just fill it
+        if t * 2 >= width or t * 2 >= height:
+            self.fill_rect(x, y, width, height, color)
+            return
+        # Top strip
+        self.fill_rect(x, y, width, t, color)
+        # Bottom strip
+        self.fill_rect(x, y + height - t, width, t, color)
+        # Left strip (between top and bottom already filled)
+        self.fill_rect(x, y + t, t, height - 2 * t, color)
+        # Right strip
+        self.fill_rect(x + width - t, y + t, t, height - 2 * t, color)
 
     fun line(self, x1: i32, y1: i32, x2: i32, y2: i32, color: DrawColor, thickness: i32):
         if self.fb_valid == 0:
             return
         zero: i32 = self.fb_valid - self.fb_valid
+        t: i32 = thickness
+        if t <= 0:
+            t = zero + 1
+        half: i32 = t / 2
+        # Clip rect bounds (full canvas if clip inactive)
+        cmin_x: i32 = zero
+        cmin_y: i32 = zero
+        cmax_x: i32 = self.width
+        cmax_y: i32 = self.height
+        if self.clip_active == 1:
+            cmin_x = self.clip_x
+            cmin_y = self.clip_y
+            cmax_x = self.clip_x + self.clip_w
+            cmax_y = self.clip_y + self.clip_h
         dx: i32 = x2 - x1
         dy: i32 = y2 - y1
         if dx < zero:
@@ -144,9 +199,26 @@ imple DrawCanvas:
         cx: i32 = x1
         cy: i32 = y1
         done: i32 = zero
+        px: i32 = zero
+        py: i32 = zero
+        tx: i32 = zero
+        ty: i32 = zero
         while done == 0:
-            if cx >= zero and cy >= zero and cx < self.width and cy < self.height:
-                Memory.write_i32(self.fb_data + (cy as i64) * (self.fb_pitch as i64) + (cx as i64) * 4, color)
+            if t == 1:
+                if cx >= cmin_x and cy >= cmin_y and cx < cmax_x and cy < cmax_y:
+                    Memory.write_i32(self.fb_data + (cy as i64) * (self.fb_pitch as i64) + (cx as i64) * 4, color)
+            else:
+                # Thick: write a t×t block centered on the Bresenham point
+                ty = zero
+                while ty < t:
+                    py = cy - half + ty
+                    tx = zero
+                    while tx < t:
+                        px = cx - half + tx
+                        if px >= cmin_x and py >= cmin_y and px < cmax_x and py < cmax_y:
+                            Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                        tx = tx + 1
+                    ty = ty + 1
             if cx == x2 and cy == y2:
                 done = zero + 1
             else:
@@ -189,7 +261,8 @@ imple DrawCanvas:
                             px = x + i * 8 + rx
                             py = y + ry
                             if px >= zero and py >= zero and px < self.width and py < self.height:
-                                Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                                if self.clip_active == 0 or (px >= self.clip_x and py >= self.clip_y and px < self.clip_x + self.clip_w and py < self.clip_y + self.clip_h):
+                                    Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
                         rx = rx + 1
                     ry = ry + 1
             i = i + 1
@@ -200,6 +273,191 @@ imple DrawCanvas:
         length: i32 = Memory.strlen(value) as i32
         self.fill_rect(x, y, length * 8, 8, background)
         self.text(x, y, value, color)
+
+    # Render text with an integer scale factor (1 = 8x8, 2 = 16x16, 3 = 24x24, ...).
+    # Each glyph bit is drawn as a scale×scale block of pixels via fill_rect,
+    # so clip handling is inherited for free.
+    fun text_scaled(self, x: i32, y: i32, value: str, color: DrawColor, scale: i32):
+        if self.fb_valid == 0:
+            return
+        if self.font == 0:
+            return
+        s: i32 = scale
+        if s <= 0:
+            s = self.fb_valid - self.fb_valid + 1
+        if s == 1:
+            self.text(x, y, value, color)
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        text_ptr: i64 = value as i64
+        length: i32 = Memory.strlen(value) as i32
+        i: i32 = zero
+        ch: i32 = zero
+        glyph_index: i32 = zero
+        base: i64 = zero as i64
+        row_byte: i32 = zero
+        rx: i32 = zero
+        ry: i32 = zero
+        px: i32 = zero
+        py: i32 = zero
+        while i < length:
+            ch = Memory.read_i8(text_ptr + (i as i64)) & 255
+            glyph_index = ch - 32
+            if glyph_index >= zero and glyph_index < 95:
+                base = self.font + (glyph_index as i64) * 8
+                ry = zero
+                while ry < 8:
+                    row_byte = Memory.read_i8(base + (ry as i64)) & 255
+                    rx = zero
+                    while rx < 8:
+                        if (row_byte & (128 >> rx)) != 0:
+                            px = x + (i * 8 + rx) * s
+                            py = y + ry * s
+                            self.fill_rect(px, py, s, s, color)
+                        rx = rx + 1
+                    ry = ry + 1
+            i = i + 1
+
+    fun text_scaled_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor, scale: i32):
+        if self.fb_valid == 0:
+            return
+        s: i32 = scale
+        if s <= 0:
+            s = self.fb_valid - self.fb_valid + 1
+        length: i32 = Memory.strlen(value) as i32
+        self.fill_rect(x, y, length * 8 * s, 8 * s, background)
+        self.text_scaled(x, y, value, color, s)
+
+    # ----- Clip region -----
+
+    fun set_clip(self, x: i32, y: i32, width: i32, height: i32):
+        if self.fb_valid == 0:
+            return
+        self.clip_x = x
+        self.clip_y = y
+        self.clip_w = width
+        self.clip_h = height
+        self.clip_active = self.fb_valid - self.fb_valid + 1
+
+    fun clear_clip(self):
+        self.clip_active = self.fb_valid - self.fb_valid
+
+    # ----- Circle (filled) — scanline using isqrt -----
+
+    fun fill_circle(self, cx: i32, cy: i32, radius: i32, color: DrawColor):
+        if self.fb_valid == 0:
+            return
+        if radius <= 0:
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        r2: i32 = radius * radius
+        y: i32 = zero - radius
+        span: i32 = zero
+        while y <= radius:
+            span = draw_isqrt(r2 - y * y)
+            self.fill_rect(cx - span, cy + y, 2 * span + 1, 1, color)
+            y = y + 1
+
+    # ----- Circle (outline) — annulus between two radii -----
+
+    fun outline_circle(self, cx: i32, cy: i32, radius: i32, color: DrawColor, thickness: i32):
+        if self.fb_valid == 0:
+            return
+        if radius <= 0:
+            return
+        t: i32 = thickness
+        if t <= 0:
+            t = self.fb_valid - self.fb_valid + 1
+        if t >= radius:
+            self.fill_circle(cx, cy, radius, color)
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        inner: i32 = radius - t
+        r2: i32 = radius * radius
+        ir2: i32 = inner * inner
+        y: i32 = zero - radius
+        outer_span: i32 = zero
+        inner_span: i32 = zero
+        while y <= radius:
+            outer_span = draw_isqrt(r2 - y * y)
+            if y >= (zero - inner) and y <= inner:
+                inner_span = draw_isqrt(ir2 - y * y)
+                # Left and right strips of the annulus at this row
+                self.fill_rect(cx - outer_span, cy + y, outer_span - inner_span, 1, color)
+                self.fill_rect(cx + inner_span + 1, cy + y, outer_span - inner_span, 1, color)
+            else:
+                # This row is inside the ring only — full horizontal strip
+                self.fill_rect(cx - outer_span, cy + y, 2 * outer_span + 1, 1, color)
+            y = y + 1
+
+    # ----- Rounded rect (filled) -----
+
+    fun fill_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: DrawColor):
+        if self.fb_valid == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+        r: i32 = radius
+        if r <= 0:
+            self.fill_rect(x, y, width, height, color)
+            return
+        if r > width / 2:
+            r = width / 2
+        if r > height / 2:
+            r = height / 2
+        zero: i32 = self.fb_valid - self.fb_valid
+        r2: i32 = r * r
+        # Middle strip between the two rounded row bands
+        self.fill_rect(x, y + r, width, height - 2 * r, color)
+        yy: i32 = zero
+        dy: i32 = zero
+        x_inset: i32 = zero
+        while yy < r:
+            dy = r - 1 - yy
+            x_inset = r - draw_isqrt(r2 - dy * dy)
+            # Top rounded row
+            self.fill_rect(x + x_inset, y + yy, width - 2 * x_inset, 1, color)
+            # Mirror on bottom
+            self.fill_rect(x + x_inset, y + height - 1 - yy, width - 2 * x_inset, 1, color)
+            yy = yy + 1
+
+    # ----- Rounded rect (outline) -----
+
+    fun outline_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: DrawColor, thickness: i32):
+        if self.fb_valid == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+        t: i32 = thickness
+        if t <= 0:
+            t = self.fb_valid - self.fb_valid + 1
+        r: i32 = radius
+        if r <= 0:
+            self.outline_rect(x, y, width, height, color, t)
+            return
+        if r > width / 2:
+            r = width / 2
+        if r > height / 2:
+            r = height / 2
+        # If thickness >= r, the rounded corners just look like filled pie slices.
+        # Simpler: fill the whole rounded rect with color, then cut out the inner
+        # rounded rect with a smaller radius. But we'd need a background color.
+        # Pragmatic approach: draw outline as two solid rounded rects layered.
+        # This requires knowing background, so for now fall back to straight outline
+        # plus filled corner arcs.
+        # Straight segments (respecting corner offset)
+        self.fill_rect(x + r, y, width - 2 * r, t, color)                                   # top
+        self.fill_rect(x + r, y + height - t, width - 2 * r, t, color)                      # bottom
+        self.fill_rect(x, y + r, t, height - 2 * r, color)                                  # left
+        self.fill_rect(x + width - t, y + r, t, height - 2 * r, color)                      # right
+        # Corner arcs — draw as thick outline_circle sectors by drawing filled
+        # annulus rings inside each corner rect, clipped by the corner quadrant.
+        # We approximate by drawing 4 small outline_circles whose bounding box
+        # overlaps the relevant corner.
+        self.outline_circle(x + r, y + r, r, color, t)
+        self.outline_circle(x + width - r - 1, y + r, r, color, t)
+        self.outline_circle(x + r, y + height - r - 1, r, color, t)
+        self.outline_circle(x + width - r - 1, y + height - r - 1, r, color, t)
 
 fun draw_begin(hwnd: i64, width: i32, height: i32) -> DrawCanvas:
     canvas: DrawCanvas = draw_canvas_empty(hwnd)
