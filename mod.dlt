@@ -1,13 +1,17 @@
 # ============================
 #  Dolet Native UI Library
 # ============================
-# UI-layer infrastructure: draw command recording, mouse input, rect/point helpers.
-# The actual pixel drawing lives in the `draw` package.
+# Pure software 2D drawing + UI infrastructure.
+# Drawing: zero OS calls in the draw layer; one blit per frame for present.
+# Also provides: draw command recording, mouse input, rect helpers.
 module ui
-import draw
+import window
+import fonts
 
 load ui/types
+load ui/color
 load ui/bindings/win32
+load ui/canvas
 load ui/input
 load ui/commands
 
@@ -16,9 +20,15 @@ export UIRect
 export UIPoint
 export UIMouseState
 export UIDrawList
+export DrawColor
+export DrawCanvas
+export DrawBmi
 export ui_rgb
 export ui_rect_contains
 export ui_rect_contains_xy
 export ui_mouse_create
 export ui_mouse_capture
 export ui_draw_list_create
+export draw_rgb
+export draw_rgba
+export draw_begin

@@ -1,16 +1,17 @@
 # UI Module Metadata
-# UI-layer infrastructure on top of draw.
+# Pure software UI + 2D drawing library for Dolet.
 
 [info]
 name = ui
-version = 0.3.0
-description = UI infrastructure: draw command recording, mouse input, rect helpers. Drawing itself lives in `draw`.
+version = 0.4.0
+description = Native UI & drawing library for Dolet — pure software framebuffer canvas, bitmap text, draw command recording, mouse input
 
 [dependencies]
-draw
+window
+fonts
 
 [link.windows]
-# None needed — user32/gdi32 are pulled in via draw.
+system_libs = user32, gdi32
 
 [link.linux]
 # Planned later.
