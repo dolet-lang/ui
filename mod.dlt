@@ -1,37 +1,24 @@
 # ============================
 #  Dolet Native UI Library
 # ============================
-# Pure software rendering via draw.
-# Drawing: zero OS calls (draw framebuffer).
-# Present: 3 OS calls/frame (draw_win32_present).
+# UI-layer infrastructure: draw command recording, mouse input, rect/point helpers.
+# The actual pixel drawing lives in the `draw` package.
 module ui
-import window
-import fonts
+import draw
 
 load ui/types
 load ui/bindings/win32
-load ui/backends/draw
 load ui/input
 load ui/commands
 
 export UIColor
 export UIRect
 export UIPoint
-export UiCanvas
 export UIMouseState
 export UIDrawList
 export ui_rgb
 export ui_rect_contains
 export ui_rect_contains_xy
-export ui_begin
-export ui_begin_gdi
-export ui_fill_rect
-export ui_fill_square
-export ui_outline_rect
-export ui_line
-export ui_text
-export ui_text_bg
-export ui_clear
 export ui_mouse_create
 export ui_mouse_capture
 export ui_draw_list_create

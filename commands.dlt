@@ -105,7 +105,7 @@ imple UIDrawList:
     fun push_text_bg(self, x: i32, y: i32, value: str, color: UIColor, background: UIColor):
         self.write_command(UI_CMD_TEXT_BG, x, y, 0, 0, 0, 0, color, background, 0, value)
 
-    fun render(self, canvas: UiCanvas):
+    fun render(self, canvas: DrawCanvas):
         if self.has_storage() == 0:
             return
 
