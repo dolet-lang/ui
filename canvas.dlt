@@ -27,6 +27,22 @@ struct DrawCanvas:
 fun draw_canvas_empty(hwnd: i64) -> DrawCanvas:
     return DrawCanvas(hwnd=hwnd, fb_data=hwnd, width=0, height=0, fb_pitch=0, fb_valid=0, font=hwnd, clip_x=0, clip_y=0, clip_w=0, clip_h=0, clip_active=0, font_medium=hwnd)
 
+# ============================================================
+#  Per-process framebuffer + font cache
+#
+#  draw_begin() used to Memory.malloc the framebuffer + font every
+#  frame (and canvas.end() freed them). That's a ~W*H*4-byte
+#  allocation + free on every event — fine in theory, but on
+#  Windows the heap does not eagerly return to the OS, so the
+#  working set grew on every mouse move. Cache them here: one
+#  allocation for the process lifetime, re-grown only when the
+#  window resizes.
+# ============================================================
+g_fb_cache:     i64 = 0
+g_fb_cache_w:   i32 = 0
+g_fb_cache_h:   i32 = 0
+g_font_cache:   i64 = 0
+
 # ----- Integer helpers -----
 
 # Integer square root via Newton's method. Returns floor(sqrt(n)).
@@ -107,9 +123,9 @@ imple DrawCanvas:
             return
         # Delegate the GDI blit to window — ui stays platform-free.
         window_present_framebuffer(self.hwnd, self.fb_data, self.width, self.height, self.fb_pitch)
-        Memory.free(self.fb_data)
-        if self.font != 0:
-            fonts_basic_free(self.font)
+        # fb_data + font live in g_fb_cache / g_font_cache for the
+        # whole process lifetime; don't free them here or we'd churn
+        # the heap every frame.
         self.fb_data = self.fb_valid as i64 - self.fb_valid as i64
         self.font = self.fb_valid as i64 - self.fb_valid as i64
         self.fb_valid = self.fb_valid - self.fb_valid
@@ -650,13 +666,26 @@ fun draw_begin(hwnd: i64, width: i32, height: i32) -> DrawCanvas:
     canvas.height = height
     if hwnd == 0 or width <= 0 or height <= 0:
         return canvas
-    size: i64 = (width as i64) * (height as i64) * 4
-    data: i64 = Memory.malloc(size)
-    if data == 0:
+
+    # Grow (or create) the framebuffer cache only when the window
+    # resizes. Every normal frame is a pure hit — zero allocation.
+    if g_fb_cache == 0 or g_fb_cache_w != width or g_fb_cache_h != height:
+        if g_fb_cache != 0:
+            Memory.free(g_fb_cache)
+            g_fb_cache = 0
+        size: i64 = (width as i64) * (height as i64) * 4
+        g_fb_cache = Memory.malloc(size)
+        g_fb_cache_w = width
+        g_fb_cache_h = height
+    if g_fb_cache == 0:
         return canvas
-    canvas.fb_data = data
+
+    if g_font_cache == 0:
+        g_font_cache = Memory.malloc_zeroed(95 * 8)
+        fonts_basic_populate(g_font_cache)
+
+    canvas.fb_data = g_fb_cache
     canvas.fb_pitch = width * 4
-    canvas.font = Memory.malloc_zeroed(95 * 8)
-    fonts_basic_populate(canvas.font)
+    canvas.font = g_font_cache
     canvas.fb_valid = 1
     return canvas

@@ -3,8 +3,8 @@
 
 [info]
 name = ui
-version = 0.6.0
-description = Pure-Dolet drawing + UI library. Zero Win32 externs in this package — window does the platform work. Framebuffer canvas, bitmap text, draw command recording, mouse input.
+version = 0.6.1
+description = Pure-Dolet drawing + UI library. Zero Win32 externs in this package — window does the platform work. Framebuffer canvas (cached across frames), bitmap text, draw command recording, mouse input.
 
 [dependencies]
 window
