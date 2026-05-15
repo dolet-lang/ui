@@ -70,7 +70,7 @@ fun draw_isqrt_q8(n: i32) -> i32:
         y = (x + big / x) / 2
     return x
 
-imple DrawCanvas:
+attach DrawCanvas:
     fun is_valid(self) -> i32:
         return self.fb_valid
 

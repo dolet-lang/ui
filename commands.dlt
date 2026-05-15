@@ -17,7 +17,7 @@ struct UIDrawList:
     count: i32 = 0
     capacity: i32 = 0
 
-imple UIDrawList:
+attach UIDrawList:
     static fun create(capacity: i32) -> UIDrawList:
         list: UIDrawList = UIDrawList()
         if capacity <= 0:

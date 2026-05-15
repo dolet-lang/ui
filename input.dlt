@@ -14,7 +14,7 @@ struct UIMouseState:
     previous_right_down: i32 = 0
     previous_middle_down: i32 = 0
 
-imple UIMouseState:
+attach UIMouseState:
     static fun create() -> UIMouseState:
         return UIMouseState()
 
