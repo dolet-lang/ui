@@ -34,9 +34,12 @@ export ui_draw_list_create
 export draw_rgb
 export draw_rgba
 export draw_canvas_from_buffer
+export draw_canvas_from_font_face
 export ui_surface_create
 export ui_surface_wrap
 export draw_isqrt
+export draw_circle_coverage_q8
+export draw_line_coverage_q8
 export UI_CMD_CLEAR
 export UI_CMD_FILL_RECT
 export UI_CMD_OUTLINE_RECT

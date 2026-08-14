@@ -1,4 +1,5 @@
 import ui
+import fonts
 
 fun main() -> i32:
     surface: UISurface = ui_surface_create(64, 64)
@@ -23,7 +24,7 @@ fun main() -> i32:
     canvas: DrawCanvas = surface.canvas()
     commands.render(canvas)
 
-    blended: i32 = Memory.read_i32(surface.pixels + (20 as i64) * (surface.pitch as i64) + (20 as i64) * 4)
+    blended: i32 = Memory.read_i32(surface.pixels + (30 as i64) * (surface.pitch as i64) + (30 as i64) * 4)
     if blended != ui_rgb(155, 57, 29):
         commands.destroy()
         surface.destroy()
@@ -41,7 +42,60 @@ fun main() -> i32:
         print("ui smoke: command dropped")
         return 5
 
+    if surface.text_height() != 16 or surface.text_width("abc") != surface.font_advance * 3:
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: font metrics failed")
+        return 6
+
+    background: i32 = ui_rgb(0, 0, 0)
+    foreground: i32 = ui_rgb(255, 255, 255)
+    canvas.clear(64, 64, background)
+    canvas.fill_rounded_rect(8, 8, 32, 24, 7, foreground)
+    i: i32 = 0
+    partial: i32 = 0
+    pixel: i32 = 0
+    while i < 64 * 64:
+        pixel = Memory.read_i32(surface.pixels + (i as i64) * 4)
+        if pixel != background and pixel != foreground:
+            partial = 1
+        i = i + 1
+    if partial == 0:
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: rounded coverage failed")
+        return 7
+
+    canvas.clear(64, 64, background)
+    canvas.text(4, 4, "Aa", foreground)
+    i = 0
+    partial = 0
+    while i < 64 * 64:
+        pixel = Memory.read_i32(surface.pixels + (i as i64) * 4)
+        if pixel != background and pixel != foreground:
+            partial = 1
+        i = i + 1
+    if partial == 0:
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: text coverage failed")
+        return 8
+
+    custom_face: FontFace = font_face_basic_smooth(18)
+    if custom_face.is_valid() == 0:
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: custom face create failed")
+        return 9
+    if surface.use_font_face(custom_face) == 0 or surface.text_height() != 20:
+        commands.destroy()
+        surface.destroy()
+        custom_face.destroy()
+        print("ui smoke: custom face switch failed")
+        return 10
+
     commands.destroy()
     surface.destroy()
+    custom_face.destroy()
     print("ui smoke: ok")
     return 0

@@ -14,6 +14,14 @@ struct DrawCanvas:
     fb_pitch:    i32 = 0
     fb_valid:    i32 = 0
     font:        i64 = 0 as i64
+    font_width:  i32 = 8
+    font_height: i32 = 8
+    font_advance:i32 = 8
+    font_line_height: i32 = 8
+    font_first:  i32 = 32
+    font_count:  i32 = 95
+    font_stride: i32 = 8
+    font_format: i32 = 0
     clip_x:      i32 = 0
     clip_y:      i32 = 0
     clip_w:      i32 = 0
@@ -50,6 +58,87 @@ fun draw_isqrt_q8(n: i32) -> i32:
         x = y
         y = (x + big / x) / 2
     return x as i32
+
+# 4x4 ordered sub-pixel coverage for circular boundaries. Only edge/corner
+# pixels call this helper; solid interiors still use fast span fills.
+fun draw_circle_coverage_q8(dx_q8: i32, dy_q8: i32, outer_q8: i32, inner_q8: i32) -> i32:
+    outer2: i64 = (outer_q8 as i64) * (outer_q8 as i64)
+    inner2: i64 = (inner_q8 as i64) * (inner_q8 as i64)
+    samples: i32 = 0
+    sy: i32 = 0
+    sx: i32 = 0
+    ox: i32 = 0
+    oy: i32 = 0
+    px: i64 = 0
+    py: i64 = 0
+    distance2: i64 = 0
+    while sy < 4:
+        oy = -96 + sy * 64
+        sx = 0
+        while sx < 4:
+            ox = -96 + sx * 64
+            px = (dx_q8 + ox) as i64
+            py = (dy_q8 + oy) as i64
+            distance2 = px * px + py * py
+            if distance2 <= outer2:
+                if inner_q8 <= 0 or distance2 >= inner2:
+                    samples = samples + 1
+            sx = sx + 1
+        sy = sy + 1
+    return (samples * 255 + 8) / 16
+
+# Coverage of a round-capped line segment at one pixel. Coordinates are sampled
+# in Q8 fixed point so the hot path stays platform-neutral and deterministic.
+fun draw_line_coverage_q8(pixel_x: i32, pixel_y: i32, x1: i32, y1: i32, x2: i32, y2: i32, radius_q8: i32) -> i32:
+    vx: i64 = (x2 - x1) as i64
+    vy: i64 = (y2 - y1) as i64
+    length2: i64 = vx * vx + vy * vy
+    radius2: i64 = (radius_q8 as i64) * (radius_q8 as i64)
+    samples: i32 = 0
+    sy: i32 = 0
+    sx: i32 = 0
+    ox: i32 = 0
+    oy: i32 = 0
+    px_q8: i64 = 0
+    py_q8: i64 = 0
+    dx_q8: i64 = 0
+    dy_q8: i64 = 0
+    dot_q8: i64 = 0
+    t_q8: i64 = 0
+    closest_x: i64 = 0
+    closest_y: i64 = 0
+    distance_x: i64 = 0
+    distance_y: i64 = 0
+    distance2: i64 = 0
+    while sy < 4:
+        oy = -96 + sy * 64
+        sx = 0
+        while sx < 4:
+            ox = -96 + sx * 64
+            px_q8 = (pixel_x as i64) * 256 + (ox as i64)
+            py_q8 = (pixel_y as i64) * 256 + (oy as i64)
+            if length2 == 0:
+                closest_x = (x1 as i64) * 256
+                closest_y = (y1 as i64) * 256
+            else:
+                dx_q8 = px_q8 - (x1 as i64) * 256
+                dy_q8 = py_q8 - (y1 as i64) * 256
+                dot_q8 = dx_q8 * vx + dy_q8 * vy
+                t_q8 = dot_q8 / length2
+                if t_q8 < 0:
+                    t_q8 = 0
+                if t_q8 > 256:
+                    t_q8 = 256
+                closest_x = (x1 as i64) * 256 + vx * t_q8
+                closest_y = (y1 as i64) * 256 + vy * t_q8
+            distance_x = px_q8 - closest_x
+            distance_y = py_q8 - closest_y
+            distance2 = distance_x * distance_x + distance_y * distance_y
+            if distance2 <= radius2:
+                samples = samples + 1
+            sx = sx + 1
+        sy = sy + 1
+    return (samples * 255 + 8) / 16
 
 attach DrawCanvas:
     fun is_valid(self) -> i32:
@@ -310,63 +399,51 @@ attach DrawCanvas:
     # Internal: thick Bresenham line (block at each step). Called by
     # line() when thickness > 1.
     fun _line_thick(self, x1: i32, y1: i32, x2: i32, y2: i32, color: DrawColor, t: i32):
-        zero: i32 = self.fb_valid - self.fb_valid
-        half: i32 = t / 2
-        cmin_x: i32 = zero
-        cmin_y: i32 = zero
-        cmax_x: i32 = self.width
-        cmax_y: i32 = self.height
+        radius_pixels: i32 = (t + 1) / 2 + 1
+        min_x: i32 = x1
+        max_x: i32 = x2
+        min_y: i32 = y1
+        max_y: i32 = y2
+        if min_x > max_x:
+            min_x = x2
+            max_x = x1
+        if min_y > max_y:
+            min_y = y2
+            max_y = y1
+        min_x = min_x - radius_pixels
+        min_y = min_y - radius_pixels
+        max_x = max_x + radius_pixels
+        max_y = max_y + radius_pixels
+        if min_x < 0:
+            min_x = 0
+        if min_y < 0:
+            min_y = 0
+        if max_x >= self.width:
+            max_x = self.width - 1
+        if max_y >= self.height:
+            max_y = self.height - 1
         if self.clip_active == 1:
-            cmin_x = self.clip_x
-            cmin_y = self.clip_y
-            cmax_x = self.clip_x + self.clip_w
-            cmax_y = self.clip_y + self.clip_h
-        dx: i32 = x2 - x1
-        dy: i32 = y2 - y1
-        if dx < zero:
-            dx = zero - dx
-        if dy < zero:
-            dy = zero - dy
-        sx: i32 = zero + 1
-        if x1 >= x2:
-            sx = zero - 1
-        sy: i32 = zero + 1
-        if y1 >= y2:
-            sy = zero - 1
-        err: i32 = dx - dy
-        e2: i32 = zero
-        cx: i32 = x1
-        cy: i32 = y1
-        done: i32 = zero
-        px: i32 = zero
-        py: i32 = zero
-        tx: i32 = zero
-        ty: i32 = zero
-        alpha: i32 = (color >> 24) & 255
-        while done == 0:
-            ty = zero
-            while ty < t:
-                py = cy - half + ty
-                tx = zero
-                while tx < t:
-                    px = cx - half + tx
-                    if px >= cmin_x and py >= cmin_y and px < cmax_x and py < cmax_y:
-                        if alpha >= 255:
-                            Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
-                        else:
-                            self.blend_pixel(px, py, color, 255)
-                    tx = tx + 1
-                ty = ty + 1
-            if cx == x2 and cy == y2:
-                done = zero + 1
-            else:
-                e2 = 2 * err
-                if e2 > (zero - dy):
-                    err = err - dy
-                    cx = cx + sx
-                if e2 < dx:
-                    err = err + dx
-                    cy = cy + sy
+            if min_x < self.clip_x:
+                min_x = self.clip_x
+            if min_y < self.clip_y:
+                min_y = self.clip_y
+            if max_x >= self.clip_x + self.clip_w:
+                max_x = self.clip_x + self.clip_w - 1
+            if max_y >= self.clip_y + self.clip_h:
+                max_y = self.clip_y + self.clip_h - 1
+
+        radius_q8: i32 = t * 128
+        py: i32 = min_y
+        px: i32 = min_x
+        coverage: i32 = 0
+        while py <= max_y:
+            px = min_x
+            while px <= max_x:
+                coverage = draw_line_coverage_q8(px, py, x1, y1, x2, y2, radius_q8)
+                if coverage > 0:
+                    self.blend_pixel(px, py, color, coverage)
+                px = px + 1
+            py = py + 1
 
     fun text(self, x: i32, y: i32, value: str, color: DrawColor):
         if self.fb_valid == 0:
@@ -388,23 +465,29 @@ attach DrawCanvas:
         alpha: i32 = (color >> 24) & 255
         while i < length:
             ch = Memory.read_i8(text_ptr + (i as i64)) & 255
-            glyph_index = ch - 32
-            if glyph_index >= zero and glyph_index < 95:
-                base = self.font + (glyph_index as i64) * 8
+            glyph_index = ch - self.font_first
+            if glyph_index >= zero and glyph_index < self.font_count:
+                base = self.font + (glyph_index as i64) * (self.font_stride as i64)
                 ry = zero
-                while ry < 8:
-                    row_byte = Memory.read_i8(base + (ry as i64)) & 255
+                while ry < self.font_height:
+                    if self.font_format == 0:
+                        row_byte = Memory.read_i8(base + (ry as i64)) & 255
                     rx = zero
-                    while rx < 8:
-                        if (row_byte & (128 >> rx)) != 0:
-                            px = x + i * 8 + rx
+                    while rx < self.font_width:
+                        coverage: i32 = 0
+                        if self.font_format == FONT_FORMAT_A8:
+                            coverage = Memory.read_i8(base + (ry as i64) * (self.font_width as i64) + (rx as i64)) & 255
+                        elif (row_byte & (128 >> rx)) != 0:
+                            coverage = 255
+                        if coverage > 0:
+                            px = x + i * self.font_advance + rx
                             py = y + ry
                             if px >= zero and py >= zero and px < self.width and py < self.height:
                                 if self.clip_active == 0 or (px >= self.clip_x and py >= self.clip_y and px < self.clip_x + self.clip_w and py < self.clip_y + self.clip_h):
-                                    if alpha >= 255:
+                                    if alpha >= 255 and coverage >= 255:
                                         Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
                                     else:
-                                        self.blend_pixel(px, py, color, 255)
+                                        self.blend_pixel(px, py, color, coverage)
                         rx = rx + 1
                     ry = ry + 1
             i = i + 1
@@ -413,7 +496,7 @@ attach DrawCanvas:
         if self.fb_valid == 0:
             return
         length: i32 = Memory.strlen(value) as i32
-        self.fill_rect(x, y, length * 8, 8, background)
+        self.fill_rect(x, y, length * self.font_advance, self.font_line_height, background)
         self.text(x, y, value, color)
 
     # Render text with an integer scale factor (1 = 8x8, 2 = 16x16, 3 = 24x24, ...).
@@ -444,18 +527,34 @@ attach DrawCanvas:
         py: i32 = zero
         while i < length:
             ch = Memory.read_i8(text_ptr + (i as i64)) & 255
-            glyph_index = ch - 32
-            if glyph_index >= zero and glyph_index < 95:
-                base = self.font + (glyph_index as i64) * 8
+            glyph_index = ch - self.font_first
+            if glyph_index >= zero and glyph_index < self.font_count:
+                base = self.font + (glyph_index as i64) * (self.font_stride as i64)
                 ry = zero
-                while ry < 8:
-                    row_byte = Memory.read_i8(base + (ry as i64)) & 255
+                while ry < self.font_height:
+                    if self.font_format == 0:
+                        row_byte = Memory.read_i8(base + (ry as i64)) & 255
                     rx = zero
-                    while rx < 8:
-                        if (row_byte & (128 >> rx)) != 0:
-                            px = x + (i * 8 + rx) * s
+                    while rx < self.font_width:
+                        coverage: i32 = 0
+                        if self.font_format == FONT_FORMAT_A8:
+                            coverage = Memory.read_i8(base + (ry as i64) * (self.font_width as i64) + (rx as i64)) & 255
+                        elif (row_byte & (128 >> rx)) != 0:
+                            coverage = 255
+                        if coverage > 0:
+                            px = x + (i * self.font_advance + rx) * s
                             py = y + ry * s
-                            self.fill_rect(px, py, s, s, color)
+                            if coverage >= 255:
+                                self.fill_rect(px, py, s, s, color)
+                            else:
+                                sy: i32 = 0
+                                sx: i32 = 0
+                                while sy < s:
+                                    sx = 0
+                                    while sx < s:
+                                        self.blend_pixel(px + sx, py + sy, color, coverage)
+                                        sx = sx + 1
+                                    sy = sy + 1
                         rx = rx + 1
                     ry = ry + 1
             i = i + 1
@@ -467,7 +566,7 @@ attach DrawCanvas:
         if s <= 0:
             s = self.fb_valid - self.fb_valid + 1
         length: i32 = Memory.strlen(value) as i32
-        self.fill_rect(x, y, length * 8 * s, 8 * s, background)
+        self.fill_rect(x, y, length * self.font_advance * s, self.font_line_height * s, background)
         self.text_scaled(x, y, value, color, s)
 
     # ----- Clip region -----
@@ -508,37 +607,38 @@ attach DrawCanvas:
 
     # ----- Circle (filled) — scanline using isqrt -----
 
-    # Anti-aliased scanline fill. For each row y, computes the exact
-    # fractional edge position using draw_isqrt_q8 (Q8.8 fixed point)
-    # and blends the two edge pixels with coverage alpha so the arc
-    # boundary doesn't show a staircase.
+    # Fast solid spans plus 4x4 coverage on the narrow boundary ring.
     fun fill_circle(self, cx: i32, cy: i32, radius: i32, color: DrawColor):
         if self.fb_valid == 0:
             return
         if radius <= 0:
             return
-        zero: i32 = self.fb_valid - self.fb_valid
-        r2: i32 = radius * radius
-        y: i32 = zero - radius
-        span_q: i32 = zero          # sqrt(r² - y²) * 256
-        span_int: i32 = zero
-        frac: i32 = zero
-        while y <= radius:
-            span_q = draw_isqrt_q8(r2 - y * y)
-            span_int = span_q / 256
-            frac = span_q - span_int * 256
-            # Opaque interior
-            if span_int > 0:
-                self.fill_rect(cx - span_int + 1, cy + y, 2 * span_int - 1, 1, color)
-            # Two edge pixels, alpha = frac (0..255)
-            self.blend_pixel(cx - span_int,     cy + y, color, frac)
-            self.blend_pixel(cx + span_int,     cy + y, color, frac)
-            # The innermost "opaque" edge pixels also get blended to cover
-            # the boundary where frac rounds down — fully opaque
-            if span_int > 0:
-                self.blend_pixel(cx - span_int + 1, cy + y, color, 255)
-                self.blend_pixel(cx + span_int - 1, cy + y, color, 255)
-            y = y + 1
+        inner_radius: i32 = radius - 1
+        if inner_radius < 0:
+            inner_radius = 0
+        outer_limit: i32 = radius + 1
+        outer2: i32 = outer_limit * outer_limit
+        inner2: i32 = inner_radius * inner_radius
+        yy: i32 = 0 - outer_limit
+        outer_span: i32 = 0
+        inner_span: i32 = -1
+        xx: i32 = 0
+        coverage: i32 = 0
+        while yy <= outer_limit:
+            if yy * yy <= outer2:
+                outer_span = draw_isqrt(outer2 - yy * yy)
+                inner_span = -1
+                if inner_radius > 0 and yy * yy <= inner2:
+                    inner_span = draw_isqrt(inner2 - yy * yy)
+                    self.fill_rect(cx - inner_span, cy + yy, inner_span * 2 + 1, 1, color)
+                xx = 0 - outer_span
+                while xx <= outer_span:
+                    if inner_span < 0 or xx < (0 - inner_span) or xx > inner_span:
+                        coverage = draw_circle_coverage_q8(xx * 256, yy * 256, radius * 256, 0)
+                        if coverage > 0:
+                            self.blend_pixel(cx + xx, cy + yy, color, coverage)
+                    xx = xx + 1
+            yy = yy + 1
 
     # ----- Circle (outline) — AA annulus between outer and inner radii -----
 
@@ -553,46 +653,23 @@ attach DrawCanvas:
         if t >= radius:
             self.fill_circle(cx, cy, radius, color)
             return
-        zero: i32 = self.fb_valid - self.fb_valid
         inner: i32 = radius - t
-        r2: i32 = radius * radius
-        ir2: i32 = inner * inner
-        y: i32 = zero - radius
-        outer_q: i32 = zero
-        outer_i: i32 = zero
-        outer_f: i32 = zero
-        inner_q: i32 = zero
-        inner_i: i32 = zero
-        inner_f: i32 = zero
-        while y <= radius:
-            outer_q = draw_isqrt_q8(r2 - y * y)
-            outer_i = outer_q / 256
-            outer_f = outer_q - outer_i * 256
-            if y >= (zero - inner) and y <= inner:
-                inner_q = draw_isqrt_q8(ir2 - y * y)
-                inner_i = inner_q / 256
-                inner_f = inner_q - inner_i * 256
-                # Opaque ring: [inner_i+1 .. outer_i-1] on both sides
-                left_start: i32 = cx - outer_i + 1
-                left_w: i32 = outer_i - inner_i - 1
-                if left_w > 0:
-                    self.fill_rect(left_start, cy + y, left_w, 1, color)
-                right_start: i32 = cx + inner_i + 1
-                right_w: i32 = outer_i - inner_i - 1
-                if right_w > 0:
-                    self.fill_rect(right_start, cy + y, right_w, 1, color)
-                # AA edges on outer and inner
-                self.blend_pixel(cx - outer_i, cy + y, color, outer_f)
-                self.blend_pixel(cx + outer_i, cy + y, color, outer_f)
-                self.blend_pixel(cx - inner_i, cy + y, color, 255 - inner_f)
-                self.blend_pixel(cx + inner_i, cy + y, color, 255 - inner_f)
-            else:
-                # This row is fully inside the ring (no inner hole at this y)
-                if outer_i > 0:
-                    self.fill_rect(cx - outer_i + 1, cy + y, 2 * outer_i - 1, 1, color)
-                self.blend_pixel(cx - outer_i, cy + y, color, outer_f)
-                self.blend_pixel(cx + outer_i, cy + y, color, outer_f)
-            y = y + 1
+        outer_limit: i32 = radius + 1
+        limit2: i32 = outer_limit * outer_limit
+        yy: i32 = 0 - outer_limit
+        xx: i32 = 0
+        span: i32 = 0
+        coverage: i32 = 0
+        while yy <= outer_limit:
+            if yy * yy <= limit2:
+                span = draw_isqrt(limit2 - yy * yy)
+                xx = 0 - span
+                while xx <= span:
+                    coverage = draw_circle_coverage_q8(xx * 256, yy * 256, radius * 256, inner * 256)
+                    if coverage > 0:
+                        self.blend_pixel(cx + xx, cy + yy, color, coverage)
+                    xx = xx + 1
+            yy = yy + 1
 
     # ----- Rounded rect (filled) -----
 
@@ -609,20 +686,29 @@ attach DrawCanvas:
             r = width / 2
         if r > height / 2:
             r = height / 2
-        zero: i32 = self.fb_valid - self.fb_valid
-        r2: i32 = r * r
-        # Middle strip between the two rounded row bands
-        self.fill_rect(x, y + r, width, height - 2 * r, color)
-        yy: i32 = zero
-        dy: i32 = zero
-        x_inset: i32 = zero
+        # Three non-overlapping fast rectangular regions.
+        self.fill_rect(x + r, y, width - 2 * r, height, color)
+        self.fill_rect(x, y + r, r, height - 2 * r, color)
+        self.fill_rect(x + width - r, y + r, r, height - 2 * r, color)
+
+        # One coverage calculation is mirrored to all four corners.
+        yy: i32 = 0
+        xx: i32 = 0
+        dx_q8: i32 = 0
+        dy_q8: i32 = 0
+        coverage: i32 = 0
         while yy < r:
-            dy = r - 1 - yy
-            x_inset = r - draw_isqrt(r2 - dy * dy)
-            # Top rounded row
-            self.fill_rect(x + x_inset, y + yy, width - 2 * x_inset, 1, color)
-            # Mirror on bottom
-            self.fill_rect(x + x_inset, y + height - 1 - yy, width - 2 * x_inset, 1, color)
+            xx = 0
+            while xx < r:
+                dx_q8 = (xx - r) * 256 + 128
+                dy_q8 = (yy - r) * 256 + 128
+                coverage = draw_circle_coverage_q8(dx_q8, dy_q8, r * 256, 0)
+                if coverage > 0:
+                    self.blend_pixel(x + xx, y + yy, color, coverage)
+                    self.blend_pixel(x + width - 1 - xx, y + yy, color, coverage)
+                    self.blend_pixel(x + xx, y + height - 1 - yy, color, coverage)
+                    self.blend_pixel(x + width - 1 - xx, y + height - 1 - yy, color, coverage)
+                xx = xx + 1
             yy = yy + 1
 
     # ----- Rounded rect (outline) -----
@@ -711,5 +797,27 @@ fun draw_canvas_from_buffer(pixels: i64, width: i32, height: i32, pitch: i32, fo
     canvas.fb_data = pixels
     canvas.fb_pitch = pitch
     canvas.font = font
+    canvas.fb_valid = 1
+    return canvas
+
+fun draw_canvas_from_font_face(pixels: i64, width: i32, height: i32, pitch: i32, font: i64, font_width: i32, font_height: i32, font_advance: i32, font_line_height: i32, font_first: i32, font_count: i32, font_stride: i32, font_format: i32) -> DrawCanvas:
+    canvas: DrawCanvas = draw_canvas_empty()
+    canvas.width = width
+    canvas.height = height
+    if pixels == 0 or width <= 0 or height <= 0:
+        return canvas
+    if pitch < width * 4:
+        return canvas
+    canvas.fb_data = pixels
+    canvas.fb_pitch = pitch
+    canvas.font = font
+    canvas.font_width = font_width
+    canvas.font_height = font_height
+    canvas.font_advance = font_advance
+    canvas.font_line_height = font_line_height
+    canvas.font_first = font_first
+    canvas.font_count = font_count
+    canvas.font_stride = font_stride
+    canvas.font_format = font_format
     canvas.fb_valid = 1
     return canvas

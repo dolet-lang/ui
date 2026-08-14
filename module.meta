@@ -3,8 +3,8 @@
 
 [info]
 name = ui
-version = 0.7.0
-description = Pure-Dolet UI core. Owned or wrapped software surfaces, bitmap text, drawing primitives, safe growable command recording, clipping, and platform-neutral input snapshots.
+version = 0.8.0
+description = Pure-Dolet UI core with coverage-font text, anti-aliased vector primitives, owned or wrapped surfaces, safe growable command recording, clipping, and platform-neutral input snapshots.
 
 [dependencies]
 fonts

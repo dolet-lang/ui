@@ -5,13 +5,14 @@ applications. It does not create windows or read native events. A framework or
 engine supplies a pixel surface and an input snapshot; `ui` records and renders
 the interface deterministically.
 
-Current version: **0.7.0**
+Current version: **0.8.0**
 
 ## Responsibilities
 
 - BGRA8 software surfaces that can own memory or wrap external memory
 - colors, rectangles, hit testing, and alpha-aware drawing primitives
-- bitmap text through the `fonts` package
+- cached A8 coverage-font text through the independent `fonts` package
+- subpixel anti-aliased circles, rounded corners, and thin lines
 - growable draw-command buffers with owned text and nested clipping
 - platform-neutral mouse, keyboard-navigation, and text-input snapshots
 
@@ -63,6 +64,16 @@ clip rectangles are intersected while recording.
 Use `ui_surface_wrap(pixels, width, height, pitch)` when another system owns the
 framebuffer. Destroying the wrapper frees its font data but never frees the
 external pixels.
+
+The default surface font is a cached 14-pixel coverage face. Widgets should use
+`surface.text_width(value)` and `surface.text_height()` instead of assuming a
+fixed 8x8 glyph size. The lower-level `draw_canvas_from_font_face(...)`
+constructor also accepts custom A8 atlas faces supplied by the `fonts` package.
+
+`surface.use_font_face(face)` borrows a caller-owned face without copying its
+atlas. Keep that face alive until the surface is destroyed or receives another
+face. Surface creation uses the ownership-transferring internal path for its
+built-in fallback.
 
 ## Input snapshots
 

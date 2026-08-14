@@ -1,7 +1,7 @@
 # ============================
 #  UI software surface
 # ============================
-# Owns (or wraps) a BGRA8 framebuffer and the built-in bitmap font. It is
+# Owns (or wraps) a BGRA8 framebuffer and the default coverage font. It is
 # intentionally unaware of windows, swapchains, or operating systems.
 
 struct UISurface:
@@ -10,6 +10,14 @@ struct UISurface:
     height: i32 = 0
     pitch: i32 = 0
     font: i64 = 0
+    font_width: i32 = 0
+    font_height: i32 = 0
+    font_advance: i32 = 0
+    font_line_height: i32 = 0
+    font_first_codepoint: i32 = 0
+    font_glyph_count: i32 = 0
+    font_glyph_stride: i32 = 0
+    font_format: i32 = 0
     owns_pixels: i32 = 0
     owns_font: i32 = 0
     valid: i32 = 0
@@ -23,12 +31,12 @@ attach UISurface:
         surface.pixels = Memory.malloc(size)
         if surface.pixels == 0:
             return surface
-        surface.font = Memory.malloc_zeroed(95 * 8)
-        if surface.font == 0:
+        face: FontFace = font_face_basic_smooth(14)
+        if face.is_valid() == 0:
             Memory.free(surface.pixels)
             surface.pixels = 0
             return surface
-        fonts_basic_populate(surface.font)
+        surface.adopt_font_face(face)
         surface.width = width
         surface.height = height
         surface.pitch = width * 4
@@ -43,10 +51,10 @@ attach UISurface:
             return surface
         if pitch < width * 4:
             return surface
-        surface.font = Memory.malloc_zeroed(95 * 8)
-        if surface.font == 0:
+        face: FontFace = font_face_basic_smooth(14)
+        if face.is_valid() == 0:
             return surface
-        fonts_basic_populate(surface.font)
+        surface.adopt_font_face(face)
         surface.pixels = pixels
         surface.width = width
         surface.height = height
@@ -82,7 +90,51 @@ attach UISurface:
     fun canvas(self) -> DrawCanvas:
         if self.valid == 0:
             return draw_canvas_empty()
-        return draw_canvas_from_buffer(self.pixels, self.width, self.height, self.pitch, self.font)
+        return draw_canvas_from_font_face(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format)
+
+    fun text_width(self, value: string) -> i32:
+        if self.font == 0:
+            return 0
+        return (Memory.strlen(value) as i32) * self.font_advance
+
+    fun text_height(self) -> i32:
+        return self.font_line_height
+
+    # Borrow a face owned by the caller. The face must stay alive until it is
+    # replaced or the surface is destroyed. This makes runtime font switching
+    # allocation-free and avoids ambiguous shared ownership.
+    fun use_font_face(self, face: FontFace) -> i32:
+        if face.is_valid() == 0:
+            return 0
+        if self.owns_font == 1 and self.font != 0:
+            Memory.free(self.font)
+        self.font = face.pixels
+        self.font_width = face.glyph_width
+        self.font_height = face.glyph_height
+        self.font_advance = face.advance_x
+        self.font_line_height = face.line_height
+        self.font_first_codepoint = face.first_codepoint
+        self.font_glyph_count = face.glyph_count
+        self.font_glyph_stride = face.glyph_stride
+        self.font_format = face.format
+        self.owns_font = 0
+        return 1
+
+    # Transfer pixel ownership to the surface. The caller must not destroy the
+    # original face after this call.
+    fun adopt_font_face(self, face: FontFace):
+        if self.owns_font == 1 and self.font != 0:
+            Memory.free(self.font)
+        self.font = face.pixels
+        self.font_width = face.glyph_width
+        self.font_height = face.glyph_height
+        self.font_advance = face.advance_x
+        self.font_line_height = face.line_height
+        self.font_first_codepoint = face.first_codepoint
+        self.font_glyph_count = face.glyph_count
+        self.font_glyph_stride = face.glyph_stride
+        self.font_format = face.format
+        self.owns_font = face.owns_pixels
 
     fun destroy(self):
         if self.owns_pixels == 1 and self.pixels != 0:
@@ -94,6 +146,14 @@ attach UISurface:
         self.height = 0
         self.pitch = 0
         self.font = 0
+        self.font_width = 0
+        self.font_height = 0
+        self.font_advance = 0
+        self.font_line_height = 0
+        self.font_first_codepoint = 0
+        self.font_glyph_count = 0
+        self.font_glyph_stride = 0
+        self.font_format = 0
         self.owns_pixels = 0
         self.owns_font = 0
         self.valid = 0

@@ -5,6 +5,7 @@
 *.dll
 *.lib
 *.a
+tests/*-linux
 
 # Compiler intermediates
 *.mlir
