@@ -1,16 +1,13 @@
 # ============================
 #  Draw — Canvas (software framebuffer)
 # ============================
-# Pure Memory.write_i32 drawing — ZERO Win32 externs in this file.
-# Works on bare metal (swap in a physical framebuffer address) or Windows
-# (the window package blits via window_present_framebuffer when end() is
-# called).
+# Pure Memory.write_i32 drawing. A DrawCanvas wraps pixels supplied by a
+# UISurface; it never owns a native window and never presents by itself.
 #
 # All drawing is inlined inside DrawCanvas methods to avoid a DLT sret
 # codegen bug when struct-returning calls appear inside imple methods.
 
 struct DrawCanvas:
-    hwnd:        i64 = 0 as i64
     fb_data:     i64 = 0 as i64
     width:       i32 = 0
     height:      i32 = 0
@@ -24,24 +21,8 @@ struct DrawCanvas:
     clip_active: i32 = 0
     font_medium: i64 = 0 as i64
 
-fun draw_canvas_empty(hwnd: i64) -> DrawCanvas:
-    return DrawCanvas(hwnd=hwnd, fb_data=hwnd, width=0, height=0, fb_pitch=0, fb_valid=0, font=hwnd, clip_x=0, clip_y=0, clip_w=0, clip_h=0, clip_active=0, font_medium=hwnd)
-
-# ============================================================
-#  Per-process framebuffer + font cache
-#
-#  draw_begin() used to Memory.malloc the framebuffer + font every
-#  frame (and canvas.end() freed them). That's a ~W*H*4-byte
-#  allocation + free on every event — fine in theory, but on
-#  Windows the heap does not eagerly return to the OS, so the
-#  working set grew on every mouse move. Cache them here: one
-#  allocation for the process lifetime, re-grown only when the
-#  window resizes.
-# ============================================================
-g_fb_cache:     i64 = 0
-g_fb_cache_w:   i32 = 0
-g_fb_cache_h:   i32 = 0
-g_font_cache:   i64 = 0
+fun draw_canvas_empty() -> DrawCanvas:
+    return DrawCanvas()
 
 # ----- Integer helpers -----
 
@@ -61,14 +42,14 @@ fun draw_isqrt(n: i32) -> i32:
 fun draw_isqrt_q8(n: i32) -> i32:
     if n <= 0:
         return 0
-    big: i32 = n * 65536
+    big: i64 = (n as i64) * 65536
     # Newton on the scaled value (big) — result is sqrt(n)*256.
-    x: i32 = big
-    y: i32 = (x + 1) / 2
+    x: i64 = big
+    y: i64 = (x + 1) / 2
     while y < x:
         x = y
         y = (x + big / x) / 2
-    return x
+    return x as i32
 
 attach DrawCanvas:
     fun is_valid(self) -> i32:
@@ -99,10 +80,12 @@ attach DrawCanvas:
                 return
             if y >= self.clip_y + self.clip_h:
                 return
-        if alpha <= zero:
+        source_alpha: i32 = (color >> 24) & 255
+        effective_alpha: i32 = (alpha * source_alpha) / 255
+        if effective_alpha <= zero:
             return
         addr: i64 = self.fb_data + (y as i64) * (self.fb_pitch as i64) + (x as i64) * 4
-        if alpha >= 255:
+        if effective_alpha >= 255:
             Memory.write_i32(addr, color)
             return
         dst: i32 = Memory.read_i32(addr)
@@ -112,23 +95,16 @@ attach DrawCanvas:
         db: i32 = dst & 255
         dg: i32 = (dst >> 8) & 255
         dr: i32 = (dst >> 16) & 255
-        inv: i32 = 255 - alpha
-        ob: i32 = (sb * alpha + db * inv) / 255
-        og: i32 = (sg * alpha + dg * inv) / 255
-        ored: i32 = (sr * alpha + dr * inv) / 255
+        inv: i32 = 255 - effective_alpha
+        ob: i32 = (sb * effective_alpha + db * inv) / 255
+        og: i32 = (sg * effective_alpha + dg * inv) / 255
+        ored: i32 = (sr * effective_alpha + dr * inv) / 255
         Memory.write_i32(addr, (ob & 255) | ((og & 255) << 8) | ((ored & 255) << 16) | (255 << 24))
 
     fun end(self):
-        if self.fb_valid == 0:
-            return
-        # Delegate the GDI blit to window — ui stays platform-free.
-        window_present_framebuffer(self.hwnd, self.fb_data, self.width, self.height, self.fb_pitch)
-        # fb_data + font live in g_fb_cache / g_font_cache for the
-        # whole process lifetime; don't free them here or we'd churn
-        # the heap every frame.
-        self.fb_data = self.fb_valid as i64 - self.fb_valid as i64
-        self.font = self.fb_valid as i64 - self.fb_valid as i64
-        self.fb_valid = self.fb_valid - self.fb_valid
+        # Kept as a harmless frame-boundary marker for callers migrating
+        # from ui 0.6. Presentation belongs to eqoi or another host.
+        return
 
     fun clear(self, width: i32, height: i32, color: DrawColor):
         if self.fb_valid == 0:
@@ -177,11 +153,29 @@ attach DrawCanvas:
         yy: i32 = start_y
         xx: i32 = zero
         row: i64 = zero as i64
+        alpha: i32 = (color >> 24) & 255
+        if alpha <= 0:
+            return
+        inv: i32 = 255 - alpha
+        sb: i32 = color & 255
+        sg: i32 = (color >> 8) & 255
+        sr: i32 = (color >> 16) & 255
         while yy < end_y:
             row = self.fb_data + (yy as i64) * (self.fb_pitch as i64)
             xx = start_x
             while xx < end_x:
-                Memory.write_i32(row + (xx as i64) * 4, color)
+                addr: i64 = row + (xx as i64) * 4
+                if alpha >= 255:
+                    Memory.write_i32(addr, color)
+                else:
+                    dst: i32 = Memory.read_i32(addr)
+                    db: i32 = dst & 255
+                    dg: i32 = (dst >> 8) & 255
+                    dr: i32 = (dst >> 16) & 255
+                    ob: i32 = (sb * alpha + db * inv) / 255
+                    og: i32 = (sg * alpha + dg * inv) / 255
+                    ored: i32 = (sr * alpha + dr * inv) / 255
+                    Memory.write_i32(addr, (ob & 255) | ((og & 255) << 8) | ((ored & 255) << 16) | (255 << 24))
                 xx = xx + 1
             yy = yy + 1
 
@@ -348,6 +342,7 @@ attach DrawCanvas:
         py: i32 = zero
         tx: i32 = zero
         ty: i32 = zero
+        alpha: i32 = (color >> 24) & 255
         while done == 0:
             ty = zero
             while ty < t:
@@ -356,7 +351,10 @@ attach DrawCanvas:
                 while tx < t:
                     px = cx - half + tx
                     if px >= cmin_x and py >= cmin_y and px < cmax_x and py < cmax_y:
-                        Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                        if alpha >= 255:
+                            Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                        else:
+                            self.blend_pixel(px, py, color, 255)
                     tx = tx + 1
                 ty = ty + 1
             if cx == x2 and cy == y2:
@@ -387,6 +385,7 @@ attach DrawCanvas:
         ry: i32 = zero
         px: i32 = zero
         py: i32 = zero
+        alpha: i32 = (color >> 24) & 255
         while i < length:
             ch = Memory.read_i8(text_ptr + (i as i64)) & 255
             glyph_index = ch - 32
@@ -402,7 +401,10 @@ attach DrawCanvas:
                             py = y + ry
                             if px >= zero and py >= zero and px < self.width and py < self.height:
                                 if self.clip_active == 0 or (px >= self.clip_x and py >= self.clip_y and px < self.clip_x + self.clip_w and py < self.clip_y + self.clip_h):
-                                    Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                                    if alpha >= 255:
+                                        Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
+                                    else:
+                                        self.blend_pixel(px, py, color, 255)
                         rx = rx + 1
                     ry = ry + 1
             i = i + 1
@@ -478,6 +480,28 @@ attach DrawCanvas:
         self.clip_w = width
         self.clip_h = height
         self.clip_active = self.fb_valid - self.fb_valid + 1
+
+    fun intersect_clip(self, x: i32, y: i32, width: i32, height: i32):
+        nx: i32 = x
+        ny: i32 = y
+        right: i32 = x + width
+        bottom: i32 = y + height
+        if self.clip_active == 1:
+            if nx < self.clip_x:
+                nx = self.clip_x
+            if ny < self.clip_y:
+                ny = self.clip_y
+            if right > self.clip_x + self.clip_w:
+                right = self.clip_x + self.clip_w
+            if bottom > self.clip_y + self.clip_h:
+                bottom = self.clip_y + self.clip_h
+        width = right - nx
+        height = bottom - ny
+        if width < 0:
+            width = 0
+        if height < 0:
+            height = 0
+        self.set_clip(nx, ny, width, height)
 
     fun clear_clip(self):
         self.clip_active = self.fb_valid - self.fb_valid
@@ -642,16 +666,32 @@ attach DrawCanvas:
         # straight edges, so the arc and edge pixels touch cleanly with
         # no 1px notch). A full outline_circle is drawn; only the corner
         # quadrant plus the 1px seam survives the clip.
-        self.set_clip(x, y, r + 1, r + 1)
+        if saved_a == 1:
+            self.set_clip(saved_x, saved_y, saved_w, saved_h)
+        else:
+            self.clear_clip()
+        self.intersect_clip(x, y, r + 1, r + 1)
         self.outline_circle(x + r, y + r, r, color, t)
 
-        self.set_clip(x + width - r - 1, y, r + 1, r + 1)
+        if saved_a == 1:
+            self.set_clip(saved_x, saved_y, saved_w, saved_h)
+        else:
+            self.clear_clip()
+        self.intersect_clip(x + width - r - 1, y, r + 1, r + 1)
         self.outline_circle(x + width - r - 1, y + r, r, color, t)
 
-        self.set_clip(x, y + height - r - 1, r + 1, r + 1)
+        if saved_a == 1:
+            self.set_clip(saved_x, saved_y, saved_w, saved_h)
+        else:
+            self.clear_clip()
+        self.intersect_clip(x, y + height - r - 1, r + 1, r + 1)
         self.outline_circle(x + r, y + height - r - 1, r, color, t)
 
-        self.set_clip(x + width - r - 1, y + height - r - 1, r + 1, r + 1)
+        if saved_a == 1:
+            self.set_clip(saved_x, saved_y, saved_w, saved_h)
+        else:
+            self.clear_clip()
+        self.intersect_clip(x + width - r - 1, y + height - r - 1, r + 1, r + 1)
         self.outline_circle(x + width - r - 1, y + height - r - 1, r, color, t)
 
         # Restore previous clip state
@@ -660,32 +700,16 @@ attach DrawCanvas:
         else:
             self.clear_clip()
 
-fun draw_begin(hwnd: i64, width: i32, height: i32) -> DrawCanvas:
-    canvas: DrawCanvas = draw_canvas_empty(hwnd)
+fun draw_canvas_from_buffer(pixels: i64, width: i32, height: i32, pitch: i32, font: i64) -> DrawCanvas:
+    canvas: DrawCanvas = draw_canvas_empty()
     canvas.width = width
     canvas.height = height
-    if hwnd == 0 or width <= 0 or height <= 0:
+    if pixels == 0 or width <= 0 or height <= 0:
         return canvas
-
-    # Grow (or create) the framebuffer cache only when the window
-    # resizes. Every normal frame is a pure hit — zero allocation.
-    if g_fb_cache == 0 or g_fb_cache_w != width or g_fb_cache_h != height:
-        if g_fb_cache != 0:
-            Memory.free(g_fb_cache)
-            g_fb_cache = 0
-        size: i64 = (width as i64) * (height as i64) * 4
-        g_fb_cache = Memory.malloc(size)
-        g_fb_cache_w = width
-        g_fb_cache_h = height
-    if g_fb_cache == 0:
+    if pitch < width * 4:
         return canvas
-
-    if g_font_cache == 0:
-        g_font_cache = Memory.malloc_zeroed(95 * 8)
-        fonts_basic_populate(g_font_cache)
-
-    canvas.fb_data = g_fb_cache
-    canvas.fb_pitch = width * 4
-    canvas.font = g_font_cache
+    canvas.fb_data = pixels
+    canvas.fb_pitch = pitch
+    canvas.font = font
     canvas.fb_valid = 1
     return canvas

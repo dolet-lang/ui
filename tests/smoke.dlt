@@ -1,0 +1,47 @@
+import ui
+
+fun main() -> i32:
+    surface: UISurface = ui_surface_create(64, 64)
+    if surface.is_valid() == 0:
+        print("ui smoke: surface create failed")
+        return 1
+
+    commands: UIDrawList = ui_draw_list_create(2)
+    if commands.is_valid() == 0:
+        surface.destroy()
+        print("ui smoke: command list create failed")
+        return 2
+
+    commands.push_clear(64, 64, ui_rgb(1, 2, 3))
+    commands.push_clip(4, 4, 56, 56)
+    commands.push_clip(8, 8, 48, 48)
+    commands.push_fill_rect(0, 0, 64, 64, ui_rgba(220, 80, 40, 180))
+    commands.pop_clip()
+    commands.push_text(8, 8, "safe command text", ui_rgb(255, 255, 255))
+    commands.pop_clip()
+
+    canvas: DrawCanvas = surface.canvas()
+    commands.render(canvas)
+
+    blended: i32 = Memory.read_i32(surface.pixels + (20 as i64) * (surface.pitch as i64) + (20 as i64) * 4)
+    if blended != ui_rgb(155, 57, 29):
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: alpha blend failed")
+        return 3
+
+    if commands.count < 6 or commands.capacity <= 2:
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: command growth failed")
+        return 4
+    if commands.dropped != 0:
+        commands.destroy()
+        surface.destroy()
+        print("ui smoke: command dropped")
+        return 5
+
+    commands.destroy()
+    surface.destroy()
+    print("ui smoke: ok")
+    return 0

@@ -1,0 +1,105 @@
+# ============================
+#  UI software surface
+# ============================
+# Owns (or wraps) a BGRA8 framebuffer and the built-in bitmap font. It is
+# intentionally unaware of windows, swapchains, or operating systems.
+
+struct UISurface:
+    pixels: i64 = 0
+    width: i32 = 0
+    height: i32 = 0
+    pitch: i32 = 0
+    font: i64 = 0
+    owns_pixels: i32 = 0
+    owns_font: i32 = 0
+    valid: i32 = 0
+
+attach UISurface:
+    static fun create(width: i32, height: i32) -> UISurface:
+        surface: UISurface = UISurface()
+        if width <= 0 or height <= 0:
+            return surface
+        size: i64 = (width as i64) * (height as i64) * 4
+        surface.pixels = Memory.malloc(size)
+        if surface.pixels == 0:
+            return surface
+        surface.font = Memory.malloc_zeroed(95 * 8)
+        if surface.font == 0:
+            Memory.free(surface.pixels)
+            surface.pixels = 0
+            return surface
+        fonts_basic_populate(surface.font)
+        surface.width = width
+        surface.height = height
+        surface.pitch = width * 4
+        surface.owns_pixels = 1
+        surface.owns_font = 1
+        surface.valid = 1
+        return surface
+
+    static fun wrap(pixels: i64, width: i32, height: i32, pitch: i32) -> UISurface:
+        surface: UISurface = UISurface()
+        if pixels == 0 or width <= 0 or height <= 0:
+            return surface
+        if pitch < width * 4:
+            return surface
+        surface.font = Memory.malloc_zeroed(95 * 8)
+        if surface.font == 0:
+            return surface
+        fonts_basic_populate(surface.font)
+        surface.pixels = pixels
+        surface.width = width
+        surface.height = height
+        surface.pitch = pitch
+        surface.owns_pixels = 0
+        surface.owns_font = 1
+        surface.valid = 1
+        return surface
+
+    fun is_valid(self) -> i32:
+        return self.valid
+
+    fun resize(self, width: i32, height: i32) -> i32:
+        if width <= 0 or height <= 0:
+            return 0
+        if self.owns_pixels == 0:
+            if width == self.width and height == self.height:
+                return self.valid
+            return 0
+        if self.valid == 1 and width == self.width and height == self.height:
+            return 1
+        size: i64 = (width as i64) * (height as i64) * 4
+        next_pixels: i64 = Memory.realloc(self.pixels, size)
+        if next_pixels == 0:
+            return 0
+        self.pixels = next_pixels
+        self.width = width
+        self.height = height
+        self.pitch = width * 4
+        self.valid = 1
+        return 1
+
+    fun canvas(self) -> DrawCanvas:
+        if self.valid == 0:
+            return draw_canvas_empty()
+        return draw_canvas_from_buffer(self.pixels, self.width, self.height, self.pitch, self.font)
+
+    fun destroy(self):
+        if self.owns_pixels == 1 and self.pixels != 0:
+            Memory.free(self.pixels)
+        if self.owns_font == 1 and self.font != 0:
+            Memory.free(self.font)
+        self.pixels = 0
+        self.width = 0
+        self.height = 0
+        self.pitch = 0
+        self.font = 0
+        self.owns_pixels = 0
+        self.owns_font = 0
+        self.valid = 0
+
+fun ui_surface_create(width: i32, height: i32) -> UISurface:
+    return UISurface.create(width, height)
+
+fun ui_surface_wrap(pixels: i64, width: i32, height: i32, pitch: i32) -> UISurface:
+    return UISurface.wrap(pixels, width, height, pitch)

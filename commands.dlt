@@ -16,6 +16,16 @@ struct UIDrawList:
     texts: i64 = 0
     count: i32 = 0
     capacity: i32 = 0
+    text_data: i64 = 0
+    text_used: i64 = 0
+    text_capacity: i64 = 0
+    clip_xs: i64 = 0
+    clip_ys: i64 = 0
+    clip_ws: i64 = 0
+    clip_hs: i64 = 0
+    clip_top: i32 = 0
+    clip_capacity: i32 = 0
+    dropped: i32 = 0
 
 attach UIDrawList:
     static fun create(capacity: i32) -> UIDrawList:
@@ -34,6 +44,14 @@ attach UIDrawList:
         list.backgrounds = Memory.malloc_zeroed(capacity * 4)
         list.thicknesses = Memory.malloc_zeroed(capacity * 4)
         list.texts = Memory.malloc_zeroed(capacity * 8)
+        list.text_capacity = (capacity as i64) * 24 + 1
+        list.text_data = Memory.malloc_zeroed(list.text_capacity)
+        list.text_used = 1
+        list.clip_capacity = 16
+        list.clip_xs = Memory.malloc_zeroed(list.clip_capacity * 4)
+        list.clip_ys = Memory.malloc_zeroed(list.clip_capacity * 4)
+        list.clip_ws = Memory.malloc_zeroed(list.clip_capacity * 4)
+        list.clip_hs = Memory.malloc_zeroed(list.clip_capacity * 4)
         list.count = capacity - capacity
         list.capacity = capacity
 
@@ -66,6 +84,16 @@ attach UIDrawList:
             Memory.free(self.thicknesses)
         if self.texts != 0:
             Memory.free(self.texts)
+        if self.text_data != 0:
+            Memory.free(self.text_data)
+        if self.clip_xs != 0:
+            Memory.free(self.clip_xs)
+        if self.clip_ys != 0:
+            Memory.free(self.clip_ys)
+        if self.clip_ws != 0:
+            Memory.free(self.clip_ws)
+        if self.clip_hs != 0:
+            Memory.free(self.clip_hs)
 
         self.kinds = 0
         self.xs = 0
@@ -78,11 +106,26 @@ attach UIDrawList:
         self.backgrounds = 0
         self.thicknesses = 0
         self.texts = 0
+        self.text_data = 0
+        self.text_used = 0
+        self.text_capacity = 0
+        self.clip_xs = 0
+        self.clip_ys = 0
+        self.clip_ws = 0
+        self.clip_hs = 0
+        self.clip_top = 0
+        self.clip_capacity = 0
+        self.dropped = 0
         self.count = self.count - self.count
         self.capacity = self.capacity - self.capacity
 
     fun clear(self):
         self.count = self.count - self.count
+        self.text_used = 1
+        self.clip_top = 0
+        self.dropped = 0
+        if self.text_data != 0:
+            Memory.write_i8(self.text_data, 0)
 
     fun is_valid(self) -> i32:
         return self.has_storage()
@@ -118,10 +161,59 @@ attach UIDrawList:
         self.write_command(UI_CMD_OUTLINE_ROUNDED_RECT, x, y, width, height, radius, 0, color, 0, thickness, "")
 
     fun push_clip(self, x: i32, y: i32, width: i32, height: i32):
-        self.write_command(UI_CMD_CLIP_PUSH, x, y, width, height, 0, 0, 0, 0, 0, "")
+        if self.ensure_clip_capacity(self.clip_top + 1) == 0:
+            self.dropped = self.dropped + 1
+            return
+        nx: i32 = x
+        ny: i32 = y
+        nw: i32 = width
+        nh: i32 = height
+        if self.clip_top > 0:
+            prev: i64 = ((self.clip_top - 1) as i64) * 4
+            px: i32 = Memory.read_i32(self.clip_xs + prev)
+            py: i32 = Memory.read_i32(self.clip_ys + prev)
+            pw: i32 = Memory.read_i32(self.clip_ws + prev)
+            ph: i32 = Memory.read_i32(self.clip_hs + prev)
+            if nx < px:
+                nx = px
+            if ny < py:
+                ny = py
+            right: i32 = x + width
+            bottom: i32 = y + height
+            if right > px + pw:
+                right = px + pw
+            if bottom > py + ph:
+                bottom = py + ph
+            nw = right - nx
+            nh = bottom - ny
+        if nw < 0:
+            nw = 0
+        if nh < 0:
+            nh = 0
+        off: i64 = (self.clip_top as i64) * 4
+        Memory.write_i32(self.clip_xs + off, nx)
+        Memory.write_i32(self.clip_ys + off, ny)
+        Memory.write_i32(self.clip_ws + off, nw)
+        Memory.write_i32(self.clip_hs + off, nh)
+        self.clip_top = self.clip_top + 1
+        self.write_command(UI_CMD_CLIP_PUSH, nx, ny, nw, nh, 0, 0, 0, 0, 0, "")
 
     fun pop_clip(self):
-        self.write_command(UI_CMD_CLIP_POP, 0, 0, 0, 0, 0, 0, 0, 0, 0, "")
+        if self.clip_top <= 0:
+            return
+        self.clip_top = self.clip_top - 1
+        if self.clip_top <= 0:
+            self.write_command(UI_CMD_CLIP_POP, 0, 0, 0, 0, 0, 0, 0, 0, 0, "")
+            return
+        off: i64 = ((self.clip_top - 1) as i64) * 4
+        self.write_command(
+            UI_CMD_CLIP_PUSH,
+            Memory.read_i32(self.clip_xs + off),
+            Memory.read_i32(self.clip_ys + off),
+            Memory.read_i32(self.clip_ws + off),
+            Memory.read_i32(self.clip_hs + off),
+            0, 0, 0, 0, 0, ""
+        )
 
     fun render(self, canvas: DrawCanvas):
         if self.has_storage() == 0:
@@ -155,7 +247,8 @@ attach UIDrawList:
             color = Memory.read_i32(self.colors + off32)
             background = Memory.read_i32(self.backgrounds + off32)
             thickness = Memory.read_i32(self.thicknesses + off32)
-            value = Memory.read_i64(self.texts + off64) as str
+            text_offset: i64 = Memory.read_i64(self.texts + off64)
+            value = (self.text_data + text_offset) as str
 
             if kind == UI_CMD_CLEAR:
                 canvas.clear(width, height, color)
@@ -186,12 +279,20 @@ attach UIDrawList:
 
     fun write_command(self, kind: i32, x: i32, y: i32, width: i32, height: i32, x2: i32, y2: i32, color: UIColor, background: UIColor, thickness: i32, value: str):
         if self.has_storage() == 0:
+            self.dropped = self.dropped + 1
             return
-        if self.count >= self.capacity:
+        if self.ensure_capacity(self.count + 1) == 0:
+            self.dropped = self.dropped + 1
             return
 
         off32: i64 = self.offset_i32(self.count)
         off64: i64 = self.offset_i64(self.count)
+        text_offset: i64 = 0
+        if kind == UI_CMD_TEXT or kind == UI_CMD_TEXT_BG:
+            text_offset = self.store_text(value)
+            if text_offset < 0:
+                self.dropped = self.dropped + 1
+                return
         Memory.write_i32(self.kinds + off32, kind)
         Memory.write_i32(self.xs + off32, x)
         Memory.write_i32(self.ys + off32, y)
@@ -202,8 +303,120 @@ attach UIDrawList:
         Memory.write_i32(self.colors + off32, color)
         Memory.write_i32(self.backgrounds + off32, background)
         Memory.write_i32(self.thicknesses + off32, thickness)
-        Memory.write_i64(self.texts + off64, value as i64)
+        Memory.write_i64(self.texts + off64, text_offset)
         self.count = self.count + 1
+
+    fun ensure_capacity(self, required: i32) -> i32:
+        if required <= self.capacity:
+            return 1
+        next_capacity: i32 = self.capacity * 2
+        if next_capacity < 32:
+            next_capacity = 32
+        while next_capacity < required:
+            next_capacity = next_capacity * 2
+        bytes32: i64 = (next_capacity as i64) * 4
+        bytes64: i64 = (next_capacity as i64) * 8
+        next: i64 = Memory.realloc(self.kinds, bytes32)
+        if next == 0:
+            return 0
+        self.kinds = next
+        next = Memory.realloc(self.xs, bytes32)
+        if next == 0:
+            return 0
+        self.xs = next
+        next = Memory.realloc(self.ys, bytes32)
+        if next == 0:
+            return 0
+        self.ys = next
+        next = Memory.realloc(self.widths, bytes32)
+        if next == 0:
+            return 0
+        self.widths = next
+        next = Memory.realloc(self.heights, bytes32)
+        if next == 0:
+            return 0
+        self.heights = next
+        next = Memory.realloc(self.x2s, bytes32)
+        if next == 0:
+            return 0
+        self.x2s = next
+        next = Memory.realloc(self.y2s, bytes32)
+        if next == 0:
+            return 0
+        self.y2s = next
+        next = Memory.realloc(self.colors, bytes32)
+        if next == 0:
+            return 0
+        self.colors = next
+        next = Memory.realloc(self.backgrounds, bytes32)
+        if next == 0:
+            return 0
+        self.backgrounds = next
+        next = Memory.realloc(self.thicknesses, bytes32)
+        if next == 0:
+            return 0
+        self.thicknesses = next
+        next = Memory.realloc(self.texts, bytes64)
+        if next == 0:
+            return 0
+        self.texts = next
+        self.capacity = next_capacity
+        return 1
+
+    fun ensure_text_capacity(self, required: i64) -> i32:
+        if required <= self.text_capacity:
+            return 1
+        next_capacity: i64 = self.text_capacity * 2
+        if next_capacity < 256:
+            next_capacity = 256
+        while next_capacity < required:
+            next_capacity = next_capacity * 2
+        next: i64 = Memory.realloc(self.text_data, next_capacity)
+        if next == 0:
+            return 0
+        self.text_data = next
+        self.text_capacity = next_capacity
+        return 1
+
+    fun store_text(self, value: str) -> i64:
+        length: i64 = Memory.strlen(value)
+        required: i64 = self.text_used + length + 1
+        if self.ensure_text_capacity(required) == 0:
+            return 0 - 1
+        offset: i64 = self.text_used
+        if length > 0:
+            Memory.copy(self.text_data + offset, value as i64, length)
+        Memory.write_i8(self.text_data + offset + length, 0)
+        self.text_used = required
+        return offset
+
+    fun ensure_clip_capacity(self, required: i32) -> i32:
+        if required <= self.clip_capacity:
+            return 1
+        next_capacity: i32 = self.clip_capacity * 2
+        if next_capacity < 16:
+            next_capacity = 16
+        while next_capacity < required:
+            next_capacity = next_capacity * 2
+        bytes: i64 = (next_capacity as i64) * 4
+        next: i64 = Memory.realloc(self.clip_xs, bytes)
+        if next == 0:
+            return 0
+        self.clip_xs = next
+        next = Memory.realloc(self.clip_ys, bytes)
+        if next == 0:
+            return 0
+        self.clip_ys = next
+        next = Memory.realloc(self.clip_ws, bytes)
+        if next == 0:
+            return 0
+        self.clip_ws = next
+        next = Memory.realloc(self.clip_hs, bytes)
+        if next == 0:
+            return 0
+        self.clip_hs = next
+        self.clip_capacity = next_capacity
+        return 1
 
     fun has_storage(self) -> i32:
         if self.capacity <= 0:
@@ -229,6 +442,10 @@ attach UIDrawList:
         if self.thicknesses == 0:
             return 0
         if self.texts == 0:
+            return 0
+        if self.text_data == 0:
+            return 0
+        if self.clip_xs == 0 or self.clip_ys == 0 or self.clip_ws == 0 or self.clip_hs == 0:
             return 0
         return 1
 

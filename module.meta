@@ -3,19 +3,17 @@
 
 [info]
 name = ui
-version = 0.6.1
-description = Pure-Dolet drawing + UI library. Zero Win32 externs in this package — window does the platform work. Framebuffer canvas (cached across frames), bitmap text, draw command recording, mouse input.
+version = 0.7.0
+description = Pure-Dolet UI core. Owned or wrapped software surfaces, bitmap text, drawing primitives, safe growable command recording, clipping, and platform-neutral input snapshots.
 
 [dependencies]
-window
 fonts
-input
 
 [link.windows]
-# None — window provides the Win32 linking.
+# No platform libraries. Presentation belongs to the application layer.
 
 [link.linux]
-# Planned later.
+# No platform libraries.
 
 [link.baremetal]
 # No system libs needed.

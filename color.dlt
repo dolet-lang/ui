@@ -20,8 +20,4 @@ fun draw_rgb(r: i32, g: i32, b: i32) -> DrawColor:
     return (bb & 255) | ((gg & 255) << 8) | ((rr & 255) << 16) | (255 << 24)
 
 fun draw_rgba(r: i32, g: i32, b: i32, a: i32) -> DrawColor:
-    rr: i32 = draw_clamp_byte(r)
-    gg: i32 = draw_clamp_byte(g)
-    bb: i32 = draw_clamp_byte(b)
-    aa: i32 = draw_clamp_byte(a)
-    return (bb & 255) | ((gg & 255) << 8) | ((rr & 255) << 16) | ((aa & 255) << 24)
+    return ui_rgba(r, g, b, a)
