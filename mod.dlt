@@ -35,6 +35,7 @@ export draw_rgb
 export draw_rgba
 export draw_canvas_from_buffer
 export draw_canvas_from_font_face
+export draw_canvas_from_font_face_metrics
 export ui_surface_create
 export ui_surface_wrap
 export draw_isqrt

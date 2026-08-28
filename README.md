@@ -73,7 +73,9 @@ constructor also accepts custom A8 atlas faces supplied by the `fonts` package.
 `surface.use_font_face(face)` borrows a caller-owned face without copying its
 atlas. Keep that face alive until the surface is destroyed or receives another
 face. Surface creation uses the ownership-transferring internal path for its
-built-in fallback.
+built-in fallback. Per-glyph advance tables are preserved, so loaded TrueType
+faces use their proportional spacing in drawing, measurement, carets, and
+widget centering.
 
 ## Input snapshots
 

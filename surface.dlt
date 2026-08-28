@@ -18,6 +18,7 @@ struct UISurface:
     font_glyph_count: i32 = 0
     font_glyph_stride: i32 = 0
     font_format: i32 = 0
+    font_advances: i64 = 0
     owns_pixels: i32 = 0
     owns_font: i32 = 0
     valid: i32 = 0
@@ -90,12 +91,23 @@ attach UISurface:
     fun canvas(self) -> DrawCanvas:
         if self.valid == 0:
             return draw_canvas_empty()
-        return draw_canvas_from_font_face(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format)
+        return draw_canvas_from_font_face_metrics(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format, self.font_advances)
 
     fun text_width(self, value: string) -> i32:
         if self.font == 0:
             return 0
-        return (Memory.strlen(value) as i32) * self.font_advance
+        length: i32 = Memory.strlen(value) as i32
+        index: i32 = 0
+        width: i32 = 0
+        while index < length:
+            codepoint: i32 = Memory.read_i8((value as i64) + (index as i64)) & 255
+            glyph_index: i32 = codepoint - self.font_first_codepoint
+            if glyph_index >= 0 and glyph_index < self.font_glyph_count and self.font_advances != 0:
+                width = width + Memory.read_i32(self.font_advances + (glyph_index as i64) * 4)
+            else:
+                width = width + self.font_advance
+            index = index + 1
+        return width
 
     fun text_height(self) -> i32:
         return self.font_line_height
@@ -117,6 +129,7 @@ attach UISurface:
         self.font_glyph_count = face.glyph_count
         self.font_glyph_stride = face.glyph_stride
         self.font_format = face.format
+        self.font_advances = face.glyph_advances
         self.owns_font = 0
         return 1
 
@@ -134,6 +147,7 @@ attach UISurface:
         self.font_glyph_count = face.glyph_count
         self.font_glyph_stride = face.glyph_stride
         self.font_format = face.format
+        self.font_advances = face.glyph_advances
         self.owns_font = face.owns_pixels
 
     fun destroy(self):
@@ -154,6 +168,7 @@ attach UISurface:
         self.font_glyph_count = 0
         self.font_glyph_stride = 0
         self.font_format = 0
+        self.font_advances = 0
         self.owns_pixels = 0
         self.owns_font = 0
         self.valid = 0

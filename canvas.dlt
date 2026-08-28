@@ -22,6 +22,7 @@ struct DrawCanvas:
     font_count:  i32 = 95
     font_stride: i32 = 8
     font_format: i32 = 0
+    font_advances: i64 = 0 as i64
     clip_x:      i32 = 0
     clip_y:      i32 = 0
     clip_w:      i32 = 0
@@ -141,6 +142,22 @@ fun draw_line_coverage_q8(pixel_x: i32, pixel_y: i32, x1: i32, y1: i32, x2: i32,
     return (samples * 255 + 8) / 16
 
 attach DrawCanvas:
+    fun glyph_advance(self, glyph_index: i32) -> i32:
+        if glyph_index < 0 or glyph_index >= self.font_count or self.font_advances == 0:
+            return self.font_advance
+        return Memory.read_i32(self.font_advances + (glyph_index as i64) * 4)
+
+    fun measure_text(self, value: str) -> i32:
+        text_ptr: i64 = value as i64
+        length: i32 = Memory.strlen(value) as i32
+        index: i32 = 0
+        width: i32 = 0
+        while index < length:
+            codepoint: i32 = Memory.read_i8(text_ptr + (index as i64)) & 255
+            width = width + self.glyph_advance(codepoint - self.font_first)
+            index = index + 1
+        return width
+
     fun is_valid(self) -> i32:
         return self.fb_valid
 
@@ -462,6 +479,7 @@ attach DrawCanvas:
         ry: i32 = zero
         px: i32 = zero
         py: i32 = zero
+        cursor_x: i32 = x
         alpha: i32 = (color >> 24) & 255
         while i < length:
             ch = Memory.read_i8(text_ptr + (i as i64)) & 255
@@ -480,7 +498,7 @@ attach DrawCanvas:
                         elif (row_byte & (128 >> rx)) != 0:
                             coverage = 255
                         if coverage > 0:
-                            px = x + i * self.font_advance + rx
+                            px = cursor_x + rx
                             py = y + ry
                             if px >= zero and py >= zero and px < self.width and py < self.height:
                                 if self.clip_active == 0 or (px >= self.clip_x and py >= self.clip_y and px < self.clip_x + self.clip_w and py < self.clip_y + self.clip_h):
@@ -490,13 +508,13 @@ attach DrawCanvas:
                                         self.blend_pixel(px, py, color, coverage)
                         rx = rx + 1
                     ry = ry + 1
+            cursor_x = cursor_x + self.glyph_advance(glyph_index)
             i = i + 1
 
     fun text_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor):
         if self.fb_valid == 0:
             return
-        length: i32 = Memory.strlen(value) as i32
-        self.fill_rect(x, y, length * self.font_advance, self.font_line_height, background)
+        self.fill_rect(x, y, self.measure_text(value), self.font_line_height, background)
         self.text(x, y, value, color)
 
     # Render text with an integer scale factor (1 = 8x8, 2 = 16x16, 3 = 24x24, ...).
@@ -525,6 +543,7 @@ attach DrawCanvas:
         ry: i32 = zero
         px: i32 = zero
         py: i32 = zero
+        cursor_x: i32 = x
         while i < length:
             ch = Memory.read_i8(text_ptr + (i as i64)) & 255
             glyph_index = ch - self.font_first
@@ -542,7 +561,7 @@ attach DrawCanvas:
                         elif (row_byte & (128 >> rx)) != 0:
                             coverage = 255
                         if coverage > 0:
-                            px = x + (i * self.font_advance + rx) * s
+                            px = cursor_x + rx * s
                             py = y + ry * s
                             if coverage >= 255:
                                 self.fill_rect(px, py, s, s, color)
@@ -557,6 +576,7 @@ attach DrawCanvas:
                                     sy = sy + 1
                         rx = rx + 1
                     ry = ry + 1
+            cursor_x = cursor_x + self.glyph_advance(glyph_index) * s
             i = i + 1
 
     fun text_scaled_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor, scale: i32):
@@ -565,8 +585,7 @@ attach DrawCanvas:
         s: i32 = scale
         if s <= 0:
             s = self.fb_valid - self.fb_valid + 1
-        length: i32 = Memory.strlen(value) as i32
-        self.fill_rect(x, y, length * self.font_advance * s, self.font_line_height * s, background)
+        self.fill_rect(x, y, self.measure_text(value) * s, self.font_line_height * s, background)
         self.text_scaled(x, y, value, color, s)
 
     # ----- Clip region -----
@@ -820,4 +839,9 @@ fun draw_canvas_from_font_face(pixels: i64, width: i32, height: i32, pitch: i32,
     canvas.font_stride = font_stride
     canvas.font_format = font_format
     canvas.fb_valid = 1
+    return canvas
+
+fun draw_canvas_from_font_face_metrics(pixels: i64, width: i32, height: i32, pitch: i32, font: i64, font_width: i32, font_height: i32, font_advance: i32, font_line_height: i32, font_first: i32, font_count: i32, font_stride: i32, font_format: i32, font_advances: i64) -> DrawCanvas:
+    canvas: DrawCanvas = draw_canvas_from_font_face(pixels, width, height, pitch, font, font_width, font_height, font_advance, font_line_height, font_first, font_count, font_stride, font_format)
+    canvas.font_advances = font_advances
     return canvas
