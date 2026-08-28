@@ -140,3 +140,14 @@ around it.
 the same spot rather than stacking, because the second is not lifted clear of
 the first. Horizontal placement is the letter's origin rather than its
 centre, so a mark on a wide letter sits left of where it should.
+
+
+## Images
+
+`push_image` blits a pixel buffer into a rectangle, sampling nearest when the
+two differ in size, blending alpha and obeying the clip stack. A tint of 0
+draws the image as it is; anything else multiplies each channel.
+
+The source is in the surface's own channel order. `ui` knows nothing about
+file formats: decoding belongs to whoever has a decoder, and converting a
+buffer belongs wherever it can be done once instead of every frame.

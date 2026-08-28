@@ -187,6 +187,64 @@ attach DrawCanvas:
             return self.glyph_advance(glyph_index)
         return self.font_advance
 
+    # Blit a pixel buffer into a rectangle, sampling nearest when the two
+    # differ in size. The source is in the surface's own channel order: the
+    # conversion happens once when an image is taken in, not per pixel per
+    # frame.
+    #
+    # A tint of 0 draws the image as it is; anything else multiplies each
+    # channel, which is what turns one white icon into a themed one.
+    fun image(self, x: i32, y: i32, width: i32, height: i32, pixels: i64, src_w: i32, src_h: i32, src_stride: i32, tint: DrawColor):
+        if self.fb_valid == 0 or pixels == 0:
+            return
+        if width <= 0 or height <= 0 or src_w <= 0 or src_h <= 0:
+            return
+        tinted: i32 = 0
+        tr: i32 = 255
+        tg: i32 = 255
+        tb: i32 = 255
+        if tint != 0:
+            tinted = 1
+            tb = tint & 255
+            tg = (tint >> 8) & 255
+            tr = (tint >> 16) & 255
+
+        dy: i32 = 0
+        dx: i32 = 0
+        px: i32 = 0
+        py: i32 = 0
+        sx: i32 = 0
+        sy: i32 = 0
+        source: i32 = 0
+        alpha: i32 = 0
+        blue: i32 = 0
+        green: i32 = 0
+        red: i32 = 0
+        while dy < height:
+            py = y + dy
+            if py >= 0 and py < self.height:
+                sy = (dy * src_h) / height
+                dx = 0
+                while dx < width:
+                    px = x + dx
+                    if px >= 0 and px < self.width:
+                        if self.clip_active == 0 or (px >= self.clip_x and py >= self.clip_y and px < self.clip_x + self.clip_w and py < self.clip_y + self.clip_h):
+                            sx = (dx * src_w) / width
+                            source = Memory.read_i32(pixels + (sy as i64) * (src_stride as i64) + (sx as i64) * 4)
+                            alpha = (source >> 24) & 255
+                            if alpha > 0:
+                                if tinted == 1:
+                                    blue = ((source & 255) * tb) / 255
+                                    green = (((source >> 8) & 255) * tg) / 255
+                                    red = (((source >> 16) & 255) * tr) / 255
+                                    source = (blue & 255) | ((green & 255) << 8) | ((red & 255) << 16) | (alpha << 24)
+                                if alpha >= 255:
+                                    Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, source)
+                                else:
+                                    self.blend_pixel(px, py, source, alpha)
+                    dx = dx + 1
+            dy = dy + 1
+
     fun set_text_scratch(self, scratch: i64, slots: i32, out: i64, out_bytes: i64, enabled: i32):
         self.text_scratch = scratch
         self.text_scratch_slots = slots

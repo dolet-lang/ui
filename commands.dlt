@@ -158,6 +158,33 @@ attach UIDrawList:
     fun is_valid(self) -> i32:
         return self.has_storage()
 
+    # An image carries a pointer rather than text, so it writes its own
+    # command: the destination rectangle scales with the display, the source
+    # dimensions must not.
+    fun push_image(self, x: i32, y: i32, width: i32, height: i32, pixels: i64, src_w: i32, src_h: i32, src_stride: i32, tint: UIColor):
+        if pixels == 0:
+            return
+        if self.has_storage() == 0:
+            self.dropped = self.dropped + 1
+            return
+        if self.ensure_capacity(self.count + 1) == 0:
+            self.dropped = self.dropped + 1
+            return
+        off32: i64 = self.offset_i32(self.count)
+        off64: i64 = self.offset_i64(self.count)
+        Memory.write_i32(self.kinds + off32, UI_CMD_IMAGE)
+        Memory.write_i32(self.xs + off32, self.scaled(x))
+        Memory.write_i32(self.ys + off32, self.scaled(y))
+        Memory.write_i32(self.widths + off32, self.scaled(width))
+        Memory.write_i32(self.heights + off32, self.scaled(height))
+        Memory.write_i32(self.x2s + off32, src_w)
+        Memory.write_i32(self.y2s + off32, src_h)
+        Memory.write_i32(self.colors + off32, tint)
+        Memory.write_i32(self.backgrounds + off32, 0)
+        Memory.write_i32(self.thicknesses + off32, src_stride)
+        Memory.write_i64(self.texts + off64, pixels)
+        self.count = self.count + 1
+
     fun push_clear(self, width: i32, height: i32, color: UIColor):
         self.write_command(UI_CMD_CLEAR, 0, 0, width, height, 0, 0, color, 0, 0, "")
 
@@ -281,7 +308,11 @@ attach UIDrawList:
             text_offset: i64 = Memory.read_i64(self.texts + off64)
             value = (self.text_data + text_offset) as str
 
-            if kind == UI_CMD_CLEAR:
+            if kind == UI_CMD_IMAGE:
+                # The pointer travels in the text slot, which an image command
+                # never uses for anything else.
+                canvas.image(x, y, width, height, text_offset, x2, y2, thickness, color)
+            elif kind == UI_CMD_CLEAR:
                 canvas.clear(width, height, color)
             elif kind == UI_CMD_FILL_RECT:
                 canvas.fill_rect(x, y, width, height, color)
