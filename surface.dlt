@@ -4,6 +4,11 @@
 # Owns (or wraps) a BGRA8 framebuffer and the default coverage font. It is
 # intentionally unaware of windows, swapchains, or operating systems.
 
+# Strings longer than this draw without the script pass. A label, a cell or
+# a button caption is far below it, and the limit keeps the draw loop free
+# of allocation.
+UI_TEXT_SCRATCH_BYTES: i64 = 1024
+
 struct UISurface:
     pixels: i64 = 0
     width: i32 = 0
@@ -17,6 +22,13 @@ struct UISurface:
     font_first_codepoint: i32 = 0
     font_second_first: i32 = 0
     font_second_count: i32 = 0
+    # Script-aware text: one scratch buffer, grown on demand and reused, so
+    # preparing a string costs no allocation inside a frame.
+    text_scratch: i64 = 0
+    text_scratch_slots: i32 = 0
+    text_out: i64 = 0
+    text_out_bytes: i64 = 0
+    text_shaping: i32 = 1
     font_glyph_count: i32 = 0
     font_glyph_stride: i32 = 0
     font_format: i32 = 0
@@ -45,6 +57,7 @@ attach UISurface:
         surface.pitch = width * 4
         surface.owns_pixels = 1
         surface.owns_font = 1
+        surface.reserve_text_scratch(UI_TEXT_SCRATCH_BYTES)
         surface.valid = 1
         return surface
 
@@ -93,13 +106,66 @@ attach UISurface:
     fun canvas(self) -> DrawCanvas:
         if self.valid == 0:
             return draw_canvas_empty()
-        return draw_canvas_from_font_face_ranges(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format, self.font_advances, self.font_second_first, self.font_second_count)
+        made: DrawCanvas = draw_canvas_from_font_face_ranges(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format, self.font_advances, self.font_second_first, self.font_second_count)
+        made.set_text_scratch(self.text_scratch, self.text_scratch_slots, self.text_out, self.text_out_bytes, self.text_shaping)
+        return made
+
+    # Whether text is put through the script pipeline before it is drawn or
+    # measured. On by default. Turn it off to draw exactly the codepoints
+    # given, which is what an application that prepared them itself wants.
+    fun set_text_shaping(self, enabled: i32):
+        self.text_shaping = enabled
+
+    # Size the shared scratch for strings up to `bytes` long. Called once when
+    # the surface is created; an application drawing unusually long strings
+    # can call it again on a surface it owns directly.
+    #
+    # It is deliberately NOT called from the drawing path. Preparing text runs
+    # for every string of every frame, and allocating there would put a malloc
+    # in the draw loop; a string longer than the scratch simply draws
+    # unprepared rather than growing it mid-frame.
+    fun reserve_text_scratch(self, bytes: i64) -> i32:
+        needed_slots: i32 = ((bytes + 1) as i32) * 7
+        needed_out: i64 = bytes * 4 + 8
+        if self.text_scratch != 0 and self.text_scratch_slots >= needed_slots and self.text_out_bytes >= needed_out:
+            return 1
+        next_slots: i32 = needed_slots * 2
+        next_out: i64 = needed_out * 2
+        scratch: i64 = Memory.malloc_zeroed((next_slots as i64) * 4)
+        if scratch == 0:
+            return 0
+        out: i64 = Memory.malloc_zeroed(next_out)
+        if out == 0:
+            Memory.free(scratch)
+            return 0
+        if self.text_scratch != 0:
+            Memory.free(self.text_scratch)
+        if self.text_out != 0:
+            Memory.free(self.text_out)
+        self.text_scratch = scratch
+        self.text_scratch_slots = next_slots
+        self.text_out = out
+        self.text_out_bytes = next_out
+        return 1
+
+    # The string as it will be drawn. Latin returns unchanged after one walk
+    # over the bytes; anything the pipeline would reorder is prepared into
+    # the shared buffer.
+    fun prepare_text(self, value: str) -> str:
+        if self.text_shaping == 0:
+            return value
+        if text_needs_display_pass(value) == 0:
+            return value
+        if text_display_str_into(value, self.text_out, self.text_out_bytes, self.text_scratch, self.text_scratch_slots) < 0:
+            return value
+        return self.text_out as str
 
     fun text_width(self, value: string) -> i32:
         if self.font == 0:
             return 0
-        limit: i64 = Memory.strlen(value)
-        bytes: i64 = value as i64
+        shown: str = self.prepare_text(value)
+        limit: i64 = Memory.strlen(shown)
+        bytes: i64 = shown as i64
         offset: i64 = 0
         width: i32 = 0
         ch: Utf8Char = Utf8Char()
@@ -111,6 +177,10 @@ attach UISurface:
             glyph_index = self.font_glyph_slot(ch.codepoint)
             if glyph_index >= 0 and self.font_advances != 0:
                 width = width + Memory.read_i32(self.font_advances + (glyph_index as i64) * 4)
+            elif unicode_bidi_class(ch.codepoint) == BIDI_NSM:
+                # A diacritic with no glyph belongs on top of the letter
+                # before it, so it takes no width rather than a fallback one.
+                width = width + 0
             else:
                 width = width + self.font_advance
             offset = offset + (ch.size as i64)
@@ -177,6 +247,14 @@ attach UISurface:
             Memory.free(self.pixels)
         if self.owns_font == 1 and self.font != 0:
             Memory.free(self.font)
+        if self.text_scratch != 0:
+            Memory.free(self.text_scratch)
+        if self.text_out != 0:
+            Memory.free(self.text_out)
+        self.text_scratch = 0
+        self.text_scratch_slots = 0
+        self.text_out = 0
+        self.text_out_bytes = 0
         self.pixels = 0
         self.width = 0
         self.height = 0

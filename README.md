@@ -109,3 +109,28 @@ everything in between.
 This is what makes non-ASCII text possible at all: drawing per byte turns each
 two-byte letter into two wrong glyphs, and measuring per byte puts every
 centred label and text caret in the wrong place.
+
+
+## Text is prepared before it is drawn
+
+Drawing and measuring both put the string through the script pipeline first:
+cursive forms are chosen and runs are reordered. An application writes the
+string it means, and correct Arabic comes out the other end without it doing
+anything.
+
+The cost on Latin is one walk over the bytes. `text_needs_display_pass` looks
+only at UTF-8 lead bytes, so a Latin string is rejected without decoding and
+returned unchanged.
+
+The working space is a single scratch buffer sized once when the surface is
+created and reused for every string. The draw loop never allocates. A string
+longer than the scratch draws unprepared rather than growing it mid-frame;
+`reserve_text_scratch` raises the limit for an application that needs it.
+
+`set_text_shaping(0)` turns the pass off, for an application that has already
+prepared its own text and wants the codepoints drawn exactly as given.
+
+A non-spacing mark the face has no glyph for takes **no** width. It is a
+diacritic that belongs on top of the letter before it, so charging it a
+fallback advance would open a hole in the middle of a word instead of quietly
+omitting an accent.

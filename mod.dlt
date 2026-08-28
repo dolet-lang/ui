@@ -6,6 +6,7 @@
 # collection belong to frameworks such as eqoi.
 module ui
 import unicode
+import text
 import fonts
 
 load ui/types

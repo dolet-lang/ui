@@ -23,6 +23,13 @@ struct DrawCanvas:
     # A second glyph block, following the first in the same atlas.
     font_first2: i32 = 0
     font_count2: i32 = 0
+    # Working space for script-aware text, borrowed from the surface so the
+    # draw loop never allocates.
+    text_scratch: i64 = 0
+    text_scratch_slots: i32 = 0
+    text_out: i64 = 0
+    text_out_bytes: i64 = 0
+    text_shaping: i32 = 0
     font_stride: i32 = 8
     font_format: i32 = 0
     font_advances: i64 = 0 as i64
@@ -165,14 +172,45 @@ attach DrawCanvas:
                 return self.font_count + index
         return 0 - 1
 
+    # Width to move the pen by for one character. A non-spacing mark the face
+    # has no glyph for takes NO space: it is a diacritic that belongs on top
+    # of the letter before it, so charging it a fallback advance would open a
+    # hole in the middle of a word instead of quietly omitting an accent.
+    fun advance_for(self, codepoint: i32, glyph_index: i32) -> i32:
+        if glyph_index >= 0:
+            return self.glyph_advance(glyph_index)
+        if unicode_bidi_class(codepoint) == BIDI_NSM:
+            return 0
+        return self.font_advance
+
+    fun set_text_scratch(self, scratch: i64, slots: i32, out: i64, out_bytes: i64, enabled: i32):
+        self.text_scratch = scratch
+        self.text_scratch_slots = slots
+        self.text_out = out
+        self.text_out_bytes = out_bytes
+        self.text_shaping = enabled
+
+    # Text as it should be drawn: cursive forms chosen and runs reordered.
+    # Returns the string unchanged when nothing needs doing, which is the
+    # common case and costs one walk over the bytes.
+    fun prepare_text(self, value: str) -> str:
+        if self.text_shaping == 0 or self.text_scratch == 0:
+            return value
+        if text_needs_display_pass(value) == 0:
+            return value
+        if text_display_str_into(value, self.text_out, self.text_out_bytes, self.text_scratch, self.text_scratch_slots) < 0:
+            return value
+        return self.text_out as str
+
     fun measure_text(self, value: str) -> i32:
-        text_ptr: i64 = value as i64
-        length: i32 = Memory.strlen(value) as i32
+        shown: str = self.prepare_text(value)
+        text_ptr: i64 = shown as i64
+        length: i32 = Memory.strlen(shown) as i32
         index: i32 = 0
         width: i32 = 0
         while index < length:
             codepoint: i32 = Memory.read_i8(text_ptr + (index as i64)) & 255
-            width = width + self.glyph_advance(self.font_glyph_index(codepoint))
+            width = width + self.advance_for(codepoint, self.font_glyph_index(codepoint))
             index = index + 1
         return width
 
@@ -486,8 +524,9 @@ attach DrawCanvas:
         if self.font == 0:
             return
         zero: i32 = self.fb_valid - self.fb_valid
-        text_ptr: i64 = value as i64
-        length: i32 = Memory.strlen(value) as i32
+        shown: str = self.prepare_text(value)
+        text_ptr: i64 = shown as i64
+        length: i32 = Memory.strlen(shown) as i32
         i: i32 = zero
         ch: i32 = zero
         glyph_index: i32 = zero
@@ -530,7 +569,7 @@ attach DrawCanvas:
                                         self.blend_pixel(px, py, color, coverage)
                         rx = rx + 1
                     ry = ry + 1
-            cursor_x = cursor_x + self.glyph_advance(glyph_index)
+            cursor_x = cursor_x + self.advance_for(ch, glyph_index)
             i = i + decoded.size
 
     fun text_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor):
@@ -554,8 +593,9 @@ attach DrawCanvas:
             self.text(x, y, value, color)
             return
         zero: i32 = self.fb_valid - self.fb_valid
-        text_ptr: i64 = value as i64
-        length: i32 = Memory.strlen(value) as i32
+        shown: str = self.prepare_text(value)
+        text_ptr: i64 = shown as i64
+        length: i32 = Memory.strlen(shown) as i32
         i: i32 = zero
         ch: i32 = zero
         glyph_index: i32 = zero
@@ -602,7 +642,7 @@ attach DrawCanvas:
                                     sy = sy + 1
                         rx = rx + 1
                     ry = ry + 1
-            cursor_x = cursor_x + self.glyph_advance(glyph_index) * s
+            cursor_x = cursor_x + self.advance_for(ch, glyph_index) * s
             i = i + decoded.size
 
     fun text_scaled_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor, scale: i32):
