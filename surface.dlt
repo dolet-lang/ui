@@ -186,6 +186,18 @@ attach UISurface:
             offset = offset + (ch.size as i64)
         return width
 
+    # Advance of a single codepoint. A caret walking a shaped, reordered line
+    # needs per-glyph widths; measuring whole strings cannot give them.
+    fun codepoint_width(self, codepoint: i32) -> i32:
+        if self.font == 0:
+            return 0
+        slot: i32 = self.font_glyph_slot(codepoint)
+        if slot >= 0 and self.font_advances != 0:
+            return Memory.read_i32(self.font_advances + (slot as i64) * 4)
+        if unicode_bidi_class(codepoint) == BIDI_NSM:
+            return 0
+        return self.font_advance
+
     # Atlas index for a codepoint across both blocks, or -1.
     fun font_glyph_slot(self, codepoint: i32) -> i32:
         index: i32 = codepoint - self.font_first_codepoint
