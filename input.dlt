@@ -99,6 +99,9 @@ struct UIInputState:
     right_pressed: i32 = 0
     up_pressed: i32 = 0
     down_pressed: i32 = 0
+    # Line-extent keys. A caret needs these as much as it needs the arrows.
+    home_pressed: i32 = 0
+    end_pressed: i32 = 0
 
 attach UIInputState:
     static fun create() -> UIInputState:
@@ -116,6 +119,8 @@ attach UIInputState:
         self.right_pressed = 0
         self.up_pressed = 0
         self.down_pressed = 0
+        self.home_pressed = 0
+        self.end_pressed = 0
 
     fun set_navigation(self, delete_pressed: i32, enter_pressed: i32, tab_pressed: i32, escape_pressed: i32, shift_down: i32, ctrl_down: i32, alt_down: i32):
         self.delete_pressed = delete_pressed
@@ -133,6 +138,10 @@ attach UIInputState:
         self.right_pressed = right
         self.up_pressed = up
         self.down_pressed = down
+
+    fun set_edit_keys(self, home: i32, line_end: i32):
+        self.home_pressed = home
+        self.end_pressed = line_end
 
 fun ui_mouse_create() -> UIMouseState:
     return UIMouseState.create()
