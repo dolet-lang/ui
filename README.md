@@ -97,3 +97,15 @@ commands.dlt    growable command recording and replay
 
 This separation is intentional: `ui` stays reusable on Windows, Linux,
 bare-metal targets, game engines, and future GPU renderers.
+
+
+## Text is UTF-8
+
+Drawing and measuring walk codepoints, not bytes. A canvas resolves a
+codepoint through two glyph blocks — the face's primary range and an optional
+second one — so a single face can carry Latin and Arabic without rasterizing
+everything in between.
+
+This is what makes non-ASCII text possible at all: drawing per byte turns each
+two-byte letter into two wrong glyphs, and measuring per byte puts every
+centred label and text caret in the wrong place.

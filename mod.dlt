@@ -5,6 +5,7 @@
 # Drawing and input state are platform-neutral. Native presentation and event
 # collection belong to frameworks such as eqoi.
 module ui
+import unicode
 import fonts
 
 load ui/types
@@ -36,6 +37,7 @@ export draw_rgba
 export draw_canvas_from_buffer
 export draw_canvas_from_font_face
 export draw_canvas_from_font_face_metrics
+export draw_canvas_from_font_face_ranges
 export ui_surface_create
 export ui_surface_wrap
 export draw_isqrt

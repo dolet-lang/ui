@@ -20,6 +20,9 @@ struct DrawCanvas:
     font_line_height: i32 = 8
     font_first:  i32 = 32
     font_count:  i32 = 95
+    # A second glyph block, following the first in the same atlas.
+    font_first2: i32 = 0
+    font_count2: i32 = 0
     font_stride: i32 = 8
     font_format: i32 = 0
     font_advances: i64 = 0 as i64
@@ -147,6 +150,17 @@ attach DrawCanvas:
             return self.font_advance
         return Memory.read_i32(self.font_advances + (glyph_index as i64) * 4)
 
+    # Atlas index for a codepoint, or -1 when the face has no glyph for it.
+    fun font_glyph_index(self, codepoint: i32) -> i32:
+        index: i32 = codepoint - self.font_first
+        if index >= 0 and index < self.font_count:
+            return index
+        if self.font_count2 > 0:
+            index = codepoint - self.font_first2
+            if index >= 0 and index < self.font_count2:
+                return self.font_count + index
+        return 0 - 1
+
     fun measure_text(self, value: str) -> i32:
         text_ptr: i64 = value as i64
         length: i32 = Memory.strlen(value) as i32
@@ -154,7 +168,7 @@ attach DrawCanvas:
         width: i32 = 0
         while index < length:
             codepoint: i32 = Memory.read_i8(text_ptr + (index as i64)) & 255
-            width = width + self.glyph_advance(codepoint - self.font_first)
+            width = width + self.glyph_advance(self.font_glyph_index(codepoint))
             index = index + 1
         return width
 
@@ -481,10 +495,14 @@ attach DrawCanvas:
         py: i32 = zero
         cursor_x: i32 = x
         alpha: i32 = (color >> 24) & 255
+        decoded: Utf8Char = Utf8Char()
         while i < length:
-            ch = Memory.read_i8(text_ptr + (i as i64)) & 255
-            glyph_index = ch - self.font_first
-            if glyph_index >= zero and glyph_index < self.font_count:
+            decoded = utf8_decode(text_ptr, i as i64, length as i64)
+            if decoded.size <= zero:
+                return
+            ch = decoded.codepoint
+            glyph_index = self.font_glyph_index(ch)
+            if glyph_index >= zero:
                 base = self.font + (glyph_index as i64) * (self.font_stride as i64)
                 ry = zero
                 while ry < self.font_height:
@@ -509,7 +527,7 @@ attach DrawCanvas:
                         rx = rx + 1
                     ry = ry + 1
             cursor_x = cursor_x + self.glyph_advance(glyph_index)
-            i = i + 1
+            i = i + decoded.size
 
     fun text_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor):
         if self.fb_valid == 0:
@@ -544,10 +562,14 @@ attach DrawCanvas:
         px: i32 = zero
         py: i32 = zero
         cursor_x: i32 = x
+        decoded: Utf8Char = Utf8Char()
         while i < length:
-            ch = Memory.read_i8(text_ptr + (i as i64)) & 255
-            glyph_index = ch - self.font_first
-            if glyph_index >= zero and glyph_index < self.font_count:
+            decoded = utf8_decode(text_ptr, i as i64, length as i64)
+            if decoded.size <= zero:
+                return
+            ch = decoded.codepoint
+            glyph_index = self.font_glyph_index(ch)
+            if glyph_index >= zero:
                 base = self.font + (glyph_index as i64) * (self.font_stride as i64)
                 ry = zero
                 while ry < self.font_height:
@@ -577,7 +599,7 @@ attach DrawCanvas:
                         rx = rx + 1
                     ry = ry + 1
             cursor_x = cursor_x + self.glyph_advance(glyph_index) * s
-            i = i + 1
+            i = i + decoded.size
 
     fun text_scaled_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor, scale: i32):
         if self.fb_valid == 0:
@@ -839,6 +861,14 @@ fun draw_canvas_from_font_face(pixels: i64, width: i32, height: i32, pitch: i32,
     canvas.font_stride = font_stride
     canvas.font_format = font_format
     canvas.fb_valid = 1
+    return canvas
+
+# Same, plus the second glyph block. Kept separate so the existing entry
+# points keep compiling for callers with a single-range face.
+fun draw_canvas_from_font_face_ranges(pixels: i64, width: i32, height: i32, pitch: i32, font: i64, font_width: i32, font_height: i32, font_advance: i32, font_line_height: i32, font_first: i32, font_count: i32, font_stride: i32, font_format: i32, font_advances: i64, font_first2: i32, font_count2: i32) -> DrawCanvas:
+    canvas: DrawCanvas = draw_canvas_from_font_face_metrics(pixels, width, height, pitch, font, font_width, font_height, font_advance, font_line_height, font_first, font_count, font_stride, font_format, font_advances)
+    canvas.font_first2 = font_first2
+    canvas.font_count2 = font_count2
     return canvas
 
 fun draw_canvas_from_font_face_metrics(pixels: i64, width: i32, height: i32, pitch: i32, font: i64, font_width: i32, font_height: i32, font_advance: i32, font_line_height: i32, font_first: i32, font_count: i32, font_stride: i32, font_format: i32, font_advances: i64) -> DrawCanvas:

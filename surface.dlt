@@ -15,6 +15,8 @@ struct UISurface:
     font_advance: i32 = 0
     font_line_height: i32 = 0
     font_first_codepoint: i32 = 0
+    font_second_first: i32 = 0
+    font_second_count: i32 = 0
     font_glyph_count: i32 = 0
     font_glyph_stride: i32 = 0
     font_format: i32 = 0
@@ -91,23 +93,39 @@ attach UISurface:
     fun canvas(self) -> DrawCanvas:
         if self.valid == 0:
             return draw_canvas_empty()
-        return draw_canvas_from_font_face_metrics(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format, self.font_advances)
+        return draw_canvas_from_font_face_ranges(self.pixels, self.width, self.height, self.pitch, self.font, self.font_width, self.font_height, self.font_advance, self.font_line_height, self.font_first_codepoint, self.font_glyph_count, self.font_glyph_stride, self.font_format, self.font_advances, self.font_second_first, self.font_second_count)
 
     fun text_width(self, value: string) -> i32:
         if self.font == 0:
             return 0
-        length: i32 = Memory.strlen(value) as i32
-        index: i32 = 0
+        limit: i64 = Memory.strlen(value)
+        bytes: i64 = value as i64
+        offset: i64 = 0
         width: i32 = 0
-        while index < length:
-            codepoint: i32 = Memory.read_i8((value as i64) + (index as i64)) & 255
-            glyph_index: i32 = codepoint - self.font_first_codepoint
-            if glyph_index >= 0 and glyph_index < self.font_glyph_count and self.font_advances != 0:
+        ch: Utf8Char = Utf8Char()
+        glyph_index: i32 = 0
+        while offset < limit:
+            ch = utf8_decode(bytes, offset, limit)
+            if ch.size <= 0:
+                return width
+            glyph_index = self.font_glyph_slot(ch.codepoint)
+            if glyph_index >= 0 and self.font_advances != 0:
                 width = width + Memory.read_i32(self.font_advances + (glyph_index as i64) * 4)
             else:
                 width = width + self.font_advance
-            index = index + 1
+            offset = offset + (ch.size as i64)
         return width
+
+    # Atlas index for a codepoint across both blocks, or -1.
+    fun font_glyph_slot(self, codepoint: i32) -> i32:
+        index: i32 = codepoint - self.font_first_codepoint
+        if index >= 0 and index < self.font_glyph_count:
+            return index
+        if self.font_second_count > 0:
+            index = codepoint - self.font_second_first
+            if index >= 0 and index < self.font_second_count:
+                return self.font_glyph_count + index
+        return 0 - 1
 
     fun text_height(self) -> i32:
         return self.font_line_height
@@ -126,6 +144,8 @@ attach UISurface:
         self.font_advance = face.advance_x
         self.font_line_height = face.line_height
         self.font_first_codepoint = face.first_codepoint
+        self.font_second_first = face.second_first
+        self.font_second_count = face.second_count
         self.font_glyph_count = face.glyph_count
         self.font_glyph_stride = face.glyph_stride
         self.font_format = face.format
@@ -144,6 +164,8 @@ attach UISurface:
         self.font_advance = face.advance_x
         self.font_line_height = face.line_height
         self.font_first_codepoint = face.first_codepoint
+        self.font_second_first = face.second_first
+        self.font_second_count = face.second_count
         self.font_glyph_count = face.glyph_count
         self.font_glyph_stride = face.glyph_stride
         self.font_format = face.format
@@ -165,6 +187,8 @@ attach UISurface:
         self.font_advance = 0
         self.font_line_height = 0
         self.font_first_codepoint = 0
+        self.font_second_first = 0
+        self.font_second_count = 0
         self.font_glyph_count = 0
         self.font_glyph_stride = 0
         self.font_format = 0
