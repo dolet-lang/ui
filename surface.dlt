@@ -212,6 +212,18 @@ attach UISurface:
     fun text_height(self) -> i32:
         return self.font_line_height
 
+    # Replace the built-in face with one at a different pixel height, owned
+    # by the surface. A display at twice the density needs a face at twice
+    # the size; asking the caller to build one would make every application
+    # carry the knowledge.
+    fun use_default_font(self, pixel_height: i32) -> i32:
+        face: FontFace = font_face_basic_smooth(pixel_height)
+        if face.is_valid() == 0:
+            return 0
+        self.adopt_font_face(face)
+        self.owns_font = 1
+        return 1
+
     # Borrow a face owned by the caller. The face must stay alive until it is
     # replaced or the surface is destroyed. This makes runtime font switching
     # allocation-free and avoids ambiguous shared ownership.

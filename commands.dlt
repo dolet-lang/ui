@@ -3,6 +3,8 @@
 # ============================
 
 struct UIDrawList:
+    # 100 is one logical pixel per physical pixel.
+    scale_percent: i32 = 100
     kinds: i64 = 0
     xs: i64 = 0
     ys: i64 = 0
@@ -28,6 +30,32 @@ struct UIDrawList:
     dropped: i32 = 0
 
 attach UIDrawList:
+    # Coordinates arrive in logical units and are written in physical ones.
+    # A display at twice the density needs everything twice the size, and the
+    # only place that has to know is the boundary where a coordinate becomes
+    # a pixel — which is here. Everything above draws at one scale and never
+    # asks what the display is doing.
+    fun set_scale(self, percent: i32):
+        if percent < 25:
+            self.scale_percent = 25
+        else:
+            self.scale_percent = percent
+
+    fun scaled(self, value: i32) -> i32:
+        if self.scale_percent == 100:
+            return value
+        return (value * self.scale_percent) / 100
+
+    # Thickness and radius must never round to nothing, or a hairline border
+    # disappears at fractional scales instead of getting thinner.
+    fun scaled_at_least_one(self, value: i32) -> i32:
+        if value <= 0:
+            return value
+        result: i32 = self.scaled(value)
+        if result < 1:
+            return 1
+        return result
+
     static fun create(capacity: i32) -> UIDrawList:
         list: UIDrawList = UIDrawList()
         if capacity <= 0:
@@ -164,10 +192,13 @@ attach UIDrawList:
         if self.ensure_clip_capacity(self.clip_top + 1) == 0:
             self.dropped = self.dropped + 1
             return
-        nx: i32 = x
-        ny: i32 = y
-        nw: i32 = width
-        nh: i32 = height
+        # Clips are stored physical, like the commands they bound; the stack
+        # intersects in that space so a nested clip cannot drift from the
+        # geometry it is meant to cut.
+        nx: i32 = self.scaled(x)
+        ny: i32 = self.scaled(y)
+        nw: i32 = self.scaled(width)
+        nh: i32 = self.scaled(height)
         if self.clip_top > 0:
             prev: i64 = ((self.clip_top - 1) as i64) * 4
             px: i32 = Memory.read_i32(self.clip_xs + prev)
@@ -294,15 +325,15 @@ attach UIDrawList:
                 self.dropped = self.dropped + 1
                 return
         Memory.write_i32(self.kinds + off32, kind)
-        Memory.write_i32(self.xs + off32, x)
-        Memory.write_i32(self.ys + off32, y)
-        Memory.write_i32(self.widths + off32, width)
-        Memory.write_i32(self.heights + off32, height)
-        Memory.write_i32(self.x2s + off32, x2)
-        Memory.write_i32(self.y2s + off32, y2)
+        Memory.write_i32(self.xs + off32, self.scaled(x))
+        Memory.write_i32(self.ys + off32, self.scaled(y))
+        Memory.write_i32(self.widths + off32, self.scaled(width))
+        Memory.write_i32(self.heights + off32, self.scaled(height))
+        Memory.write_i32(self.x2s + off32, self.scaled(x2))
+        Memory.write_i32(self.y2s + off32, self.scaled(y2))
         Memory.write_i32(self.colors + off32, color)
         Memory.write_i32(self.backgrounds + off32, background)
-        Memory.write_i32(self.thicknesses + off32, thickness)
+        Memory.write_i32(self.thicknesses + off32, self.scaled_at_least_one(thickness))
         Memory.write_i64(self.texts + off64, text_offset)
         self.count = self.count + 1
 
