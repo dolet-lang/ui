@@ -92,6 +92,13 @@ struct UIInputState:
     shift_down: i32 = 0
     ctrl_down: i32 = 0
     alt_down: i32 = 0
+    # Directional keys. A framework that offers keyboard focus needs these to
+    # move within a widget (a slider's value, a list's selection) as opposed
+    # to between widgets, which is what tab_pressed is for.
+    left_pressed: i32 = 0
+    right_pressed: i32 = 0
+    up_pressed: i32 = 0
+    down_pressed: i32 = 0
 
 attach UIInputState:
     static fun create() -> UIInputState:
@@ -105,6 +112,10 @@ attach UIInputState:
         self.enter_pressed = 0
         self.tab_pressed = 0
         self.escape_pressed = 0
+        self.left_pressed = 0
+        self.right_pressed = 0
+        self.up_pressed = 0
+        self.down_pressed = 0
 
     fun set_navigation(self, delete_pressed: i32, enter_pressed: i32, tab_pressed: i32, escape_pressed: i32, shift_down: i32, ctrl_down: i32, alt_down: i32):
         self.delete_pressed = delete_pressed
@@ -114,6 +125,14 @@ attach UIInputState:
         self.shift_down = shift_down
         self.ctrl_down = ctrl_down
         self.alt_down = alt_down
+
+    # Separate from set_navigation so existing callers keep compiling; both
+    # are one-shot and cleared by begin_frame.
+    fun set_arrows(self, left: i32, right: i32, up: i32, down: i32):
+        self.left_pressed = left
+        self.right_pressed = right
+        self.up_pressed = up
+        self.down_pressed = down
 
 fun ui_mouse_create() -> UIMouseState:
     return UIMouseState.create()
