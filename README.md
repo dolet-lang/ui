@@ -130,7 +130,13 @@ longer than the scratch draws unprepared rather than growing it mid-frame;
 `set_text_shaping(0)` turns the pass off, for an application that has already
 prepared its own text and wants the codepoints drawn exactly as given.
 
-A non-spacing mark the face has no glyph for takes **no** width. It is a
-diacritic that belongs on top of the letter before it, so charging it a
-fallback advance would open a hole in the middle of a word instead of quietly
-omitting an accent.
+A non-spacing mark takes **no** width, glyph or no glyph, and is drawn back
+over the letter it belongs to. The Arabic presentation forms carry an advance
+because that block was designed to be usable standalone, but a fatha on a
+letter is not standing alone: charging it a width would push the word apart
+around it.
+
+**Not yet here.** Two marks on one letter — a shadda with a fatha — land on
+the same spot rather than stacking, because the second is not lifted clear of
+the first. Horizontal placement is the letter's origin rather than its
+centre, so a mark on a wide letter sits left of where it should.

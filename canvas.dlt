@@ -177,10 +177,14 @@ attach DrawCanvas:
     # of the letter before it, so charging it a fallback advance would open a
     # hole in the middle of a word instead of quietly omitting an accent.
     fun advance_for(self, codepoint: i32, glyph_index: i32) -> i32:
-        if glyph_index >= 0:
-            return self.glyph_advance(glyph_index)
+        # A non-spacing mark takes no width, glyph or no glyph. The Arabic
+        # presentation forms carry an advance because that block was designed
+        # to be usable standalone, but a fatha on a letter is not standing
+        # alone: charging it a width would push the word apart around it.
         if unicode_bidi_class(codepoint) == BIDI_NSM:
             return 0
+        if glyph_index >= 0:
+            return self.glyph_advance(glyph_index)
         return self.font_advance
 
     fun set_text_scratch(self, scratch: i64, slots: i32, out: i64, out_bytes: i64, enabled: i32):
@@ -539,6 +543,11 @@ attach DrawCanvas:
         cursor_x: i32 = x
         alpha: i32 = (color >> 24) & 255
         decoded: Utf8Char = Utf8Char()
+        # How far back a mark is drawn: over the letter just placed, since
+        # the pen has already moved past it.
+        mark_back: i32 = 0
+        previous_advance: i32 = 0
+        step_width: i32 = 0
         while i < length:
             decoded = utf8_decode(text_ptr, i as i64, length as i64)
             if decoded.size <= zero:
@@ -559,7 +568,7 @@ attach DrawCanvas:
                         elif (row_byte & (128 >> rx)) != 0:
                             coverage = 255
                         if coverage > 0:
-                            px = cursor_x + rx
+                            px = cursor_x - mark_back + rx
                             py = y + ry
                             if px >= zero and py >= zero and px < self.width and py < self.height:
                                 if self.clip_active == 0 or (px >= self.clip_x and py >= self.clip_y and px < self.clip_x + self.clip_w and py < self.clip_y + self.clip_h):
@@ -569,7 +578,13 @@ attach DrawCanvas:
                                         self.blend_pixel(px, py, color, coverage)
                         rx = rx + 1
                     ry = ry + 1
-            cursor_x = cursor_x + self.advance_for(ch, glyph_index)
+            step_width = self.advance_for(ch, glyph_index)
+            if step_width > 0:
+                previous_advance = step_width
+                mark_back = 0
+            else:
+                mark_back = previous_advance
+            cursor_x = cursor_x + step_width
             i = i + decoded.size
 
     fun text_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor):
@@ -607,6 +622,11 @@ attach DrawCanvas:
         py: i32 = zero
         cursor_x: i32 = x
         decoded: Utf8Char = Utf8Char()
+        # How far back a mark is drawn: over the letter just placed, since
+        # the pen has already moved past it.
+        mark_back: i32 = 0
+        previous_advance: i32 = 0
+        step_width: i32 = 0
         while i < length:
             decoded = utf8_decode(text_ptr, i as i64, length as i64)
             if decoded.size <= zero:
@@ -627,7 +647,7 @@ attach DrawCanvas:
                         elif (row_byte & (128 >> rx)) != 0:
                             coverage = 255
                         if coverage > 0:
-                            px = cursor_x + rx * s
+                            px = cursor_x - mark_back * s + rx * s
                             py = y + ry * s
                             if coverage >= 255:
                                 self.fill_rect(px, py, s, s, color)
@@ -642,7 +662,13 @@ attach DrawCanvas:
                                     sy = sy + 1
                         rx = rx + 1
                     ry = ry + 1
-            cursor_x = cursor_x + self.advance_for(ch, glyph_index) * s
+            step_width = self.advance_for(ch, glyph_index)
+            if step_width > 0:
+                previous_advance = step_width
+                mark_back = 0
+            else:
+                mark_back = previous_advance
+            cursor_x = cursor_x + step_width * s
             i = i + decoded.size
 
     fun text_scaled_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor, scale: i32):

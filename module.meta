@@ -3,7 +3,7 @@
 
 [info]
 name = ui
-version = 0.14.0
+version = 0.15.0
 layer = pure
 description = Pure-Dolet UI core that shapes and reorders text on its way to the pixels, with UTF-8 proportional coverage-font text across Latin and Arabic glyph blocks, anti-aliased vector primitives, owned or wrapped surfaces, safe growable command recording, clipping, and platform-neutral input snapshots including directional and line-extent keys.
 
