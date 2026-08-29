@@ -56,4 +56,9 @@ export UI_CMD_FILL_ROUNDED_RECT
 export UI_CMD_OUTLINE_ROUNDED_RECT
 export UI_CMD_CLIP_PUSH
 export UI_CMD_CLIP_POP
+export UI_CMD_FILL_TRIANGLE
+export UI_CMD_ARC
+export ui_unpack_angle
+export draw_sin_q10
+export draw_cos_q10
 export UI_CMD_IMAGE

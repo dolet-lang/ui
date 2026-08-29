@@ -19,6 +19,8 @@ UI_CMD_OUTLINE_ROUNDED_RECT: i32 = 10
 UI_CMD_CLIP_PUSH:            i32 = 11
 UI_CMD_CLIP_POP:             i32 = 12
 UI_CMD_IMAGE:                i32 = 13
+UI_CMD_FILL_TRIANGLE:        i32 = 14
+UI_CMD_ARC:                  i32 = 15
 
 @stack
 struct UIRect:

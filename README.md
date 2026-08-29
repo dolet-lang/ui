@@ -151,3 +151,30 @@ draws the image as it is; anything else multiplies each channel.
 The source is in the surface's own channel order. `ui` knows nothing about
 file formats: decoding belongs to whoever has a decoder, and converting a
 buffer belongs wherever it can be done once instead of every frame.
+
+
+## Triangles and arcs
+
+`push_fill_triangle` and `push_arc` exist so an icon can be drawn rather than
+loaded. Between them and the rectangles, circles and lines already here, a
+back arrow, a reload glyph, a padlock and a star are a handful of calls, and
+they stay sharp at any size and any display scale because they are re-drawn
+rather than re-sampled.
+
+The triangle is sampled sixteen times per pixel. An arrowhead is a dozen
+pixels across and its diagonal is the whole of what the eye sees, so the
+samples cost nothing at that size and give an edge indistinguishable from an
+exact one.
+
+An arc takes degrees, with y running down the screen: 0 points right, 90
+points down, and the sweep runs from start to end that way round. Its band
+comes from the same annulus coverage an outlined circle uses, so an arc and a
+circle drawn at one radius meet without a seam. The ends are cut by asking
+which side of the two bounding directions a pixel falls on — no inverse
+trigonometry, no floating point. `draw_sin_q10` and `draw_cos_q10` supply the
+directions, from Bhaskara's approximation rather than a table: exact at 0, 30,
+90, 150 and 180, and far below a pixel everywhere else.
+
+The angles travel in the command's background slot, packed into sixteen bits
+each, because that slot is the one thing the command writer does not scale —
+and an angle that scaled with the display would bend the arc.

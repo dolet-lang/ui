@@ -40,6 +40,30 @@ struct DrawCanvas:
     clip_active: i32 = 0
     font_medium: i64 = 0 as i64
 
+# Sine of an angle in degrees, scaled by 1024.
+#
+# Bhaskara's approximation rather than a table: it is two multiplies and a
+# divide, it is exact at 0, 30, 90, 150 and 180, and it is never off by more
+# than a fifth of a degree's worth anywhere else — far below what a rasteriser
+# can show. A framework that will not link libm has to bring its own, and a
+# table of 91 entries would cost more to carry than this costs to compute.
+fun draw_sin_q10(degrees: i32) -> i32:
+    d: i32 = degrees % 360
+    if d < 0:
+        d = d + 360
+    sign: i32 = 1
+    if d > 180:
+        d = d - 180
+        sign = 0 - 1
+    span: i64 = (d as i64) * (180 - (d as i64))
+    denominator: i64 = 40500 - span
+    if denominator <= 0:
+        return 0
+    return ((4 * span * 1024) / denominator) as i32 * sign
+
+fun draw_cos_q10(degrees: i32) -> i32:
+    return draw_sin_q10(degrees + 90)
+
 fun draw_canvas_empty() -> DrawCanvas:
     return DrawCanvas()
 
@@ -841,6 +865,149 @@ attach DrawCanvas:
             yy = yy + 1
 
     # ----- Rounded rect (filled) -----
+
+    # ----- Triangle (filled) -----
+    #
+    # Sampled sixteen times per pixel rather than scanned with an analytic
+    # edge, because an icon's arrowhead is a dozen pixels across and its
+    # diagonal is the whole of what the eye sees. Sixteen samples cost nothing
+    # at that size and give an edge indistinguishable from an exact one.
+    fun fill_triangle(self, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32, color: DrawColor):
+        if self.fb_valid == 0:
+            return
+        min_x: i32 = x1
+        if x2 < min_x:
+            min_x = x2
+        if x3 < min_x:
+            min_x = x3
+        max_x: i32 = x1
+        if x2 > max_x:
+            max_x = x2
+        if x3 > max_x:
+            max_x = x3
+        min_y: i32 = y1
+        if y2 < min_y:
+            min_y = y2
+        if y3 < min_y:
+            min_y = y3
+        max_y: i32 = y1
+        if y2 > max_y:
+            max_y = y2
+        if y3 > max_y:
+            max_y = y3
+        if max_x < min_x or max_y < min_y:
+            return
+
+        # Eighths of a pixel, so the four sub-samples across sit at 1, 3, 5
+        # and 7 — the centres of the quarters, none of them on an edge.
+        ax: i64 = (x1 as i64) * 8
+        ay: i64 = (y1 as i64) * 8
+        bx: i64 = (x2 as i64) * 8
+        by: i64 = (y2 as i64) * 8
+        cx: i64 = (x3 as i64) * 8
+        cy: i64 = (y3 as i64) * 8
+
+        py: i32 = min_y
+        px: i32 = 0
+        sx: i32 = 0
+        sy: i32 = 0
+        hits: i32 = 0
+        sample_x: i64 = 0
+        sample_y: i64 = 0
+        e1: i64 = 0
+        e2: i64 = 0
+        e3: i64 = 0
+        coverage: i32 = 0
+        while py <= max_y:
+            px = min_x
+            while px <= max_x:
+                hits = 0
+                sy = 0
+                while sy < 4:
+                    sx = 0
+                    while sx < 4:
+                        sample_x = (px as i64) * 8 + (sx as i64) * 2 + 1
+                        sample_y = (py as i64) * 8 + (sy as i64) * 2 + 1
+                        e1 = (bx - ax) * (sample_y - ay) - (by - ay) * (sample_x - ax)
+                        e2 = (cx - bx) * (sample_y - by) - (cy - by) * (sample_x - bx)
+                        e3 = (ax - cx) * (sample_y - cy) - (ay - cy) * (sample_x - cx)
+                        # Same sign on all three edges, either winding, so the
+                        # caller never has to know which way round it wound.
+                        if e1 >= 0 and e2 >= 0 and e3 >= 0:
+                            hits = hits + 1
+                        elif e1 <= 0 and e2 <= 0 and e3 <= 0:
+                            hits = hits + 1
+                        sx = sx + 1
+                    sy = sy + 1
+                if hits > 0:
+                    coverage = hits * 16
+                    if coverage > 255:
+                        coverage = 255
+                    self.blend_pixel(px, py, color, coverage)
+                px = px + 1
+            py = py + 1
+
+    # ----- Arc (stroked) -----
+    #
+    # Degrees, with y running down the screen: 0 points right, 90 points down,
+    # and the sweep runs from start to end that way round. The band comes from
+    # the same annulus coverage an outlined circle uses, so an arc and a circle
+    # drawn at one radius meet without a seam; the ends are cut by asking which
+    # side of the two bounding directions a pixel falls on, which needs no
+    # inverse trigonometry and no floating point.
+    fun arc(self, cx: i32, cy: i32, radius: i32, start_deg: i32, end_deg: i32, color: DrawColor, thickness: i32):
+        if self.fb_valid == 0:
+            return
+        if radius <= 0 or thickness <= 0:
+            return
+        sweep: i32 = end_deg - start_deg
+        while sweep < 0:
+            sweep = sweep + 360
+        if sweep == 0:
+            return
+
+        outer_q8: i32 = (radius * 2 + thickness) * 128
+        inner_q8: i32 = (radius * 2 - thickness) * 128
+        if inner_q8 < 0:
+            inner_q8 = 0
+        limit: i32 = (outer_q8 / 256) + 2
+
+        start_x: i64 = draw_cos_q10(start_deg) as i64
+        start_y: i64 = draw_sin_q10(start_deg) as i64
+        end_x: i64 = draw_cos_q10(end_deg) as i64
+        end_y: i64 = draw_sin_q10(end_deg) as i64
+
+        yy: i32 = 0 - limit
+        xx: i32 = 0
+        coverage: i32 = 0
+        inside: i32 = 0
+        from_start: i64 = 0
+        to_end: i64 = 0
+        while yy <= limit:
+            xx = 0 - limit
+            while xx <= limit:
+                coverage = draw_circle_coverage_q8(xx * 256, yy * 256, outer_q8, inner_q8)
+                if coverage > 0:
+                    inside = 0
+                    if sweep >= 360:
+                        inside = 1
+                    else:
+                        from_start = start_x * (yy as i64) - start_y * (xx as i64)
+                        to_end = (xx as i64) * end_y - (yy as i64) * end_x
+                        if sweep <= 180:
+                            # A wedge of half a turn or less is the overlap of
+                            # the two half-planes.
+                            if from_start >= 0 and to_end >= 0:
+                                inside = 1
+                        else:
+                            # A wider one is everything except the wedge left
+                            # over, which is itself half a turn or less.
+                            if from_start >= 0 or to_end >= 0:
+                                inside = 1
+                    if inside == 1:
+                        self.blend_pixel(cx + xx, cy + yy, color, coverage)
+                xx = xx + 1
+            yy = yy + 1
 
     fun fill_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: DrawColor):
         if self.fb_valid == 0:
