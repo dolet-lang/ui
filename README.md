@@ -178,3 +178,37 @@ directions, from Bhaskara's approximation rather than a table: exact at 0, 30,
 The angles travel in the command's background slot, packed into sixteen bits
 each, because that slot is the one thing the command writer does not scale —
 and an angle that scaled with the display would bend the arc.
+
+
+## Text, and why it used to look wrong
+
+Four things separated this from what a browser draws, and all four are fixed.
+
+**The pen kept whole pixels.** Every advance rounded, and the errors did not
+cancel — they accumulated along the line, so letters sat unevenly and a word
+measured a pixel or two wrong. Glyphs are now rasterised at four horizontal
+phases and the pen keeps 1/256 of a pixel, picking the phase from the fraction
+it is standing on.
+
+**Nothing kerned.** The old `kern` table is gone from modern fonts — Inter has
+none — so kerning is read from GPOS pair positioning, both formats, through
+type 9 extensions. Inter yields 1048 pairs for the atlas's glyphs.
+
+**Measuring disagreed with drawing.** `text_width` summed whole-pixel advances
+and applied no kerning, which is exactly the arithmetic the pen avoids. Both
+now sum in 1/256 and round once, so a label centred by one and drawn by the
+other lands where it was put.
+
+**Coverage was blended in code, not in light.** An sRGB byte is a perceptual
+code, not a quantity of light, so half coverage landed at a fifth of the
+brightness it promised — light text on dark came out thin, and dark on light
+came out heavy. Glyph coverage is now converted to light, mixed, and converted
+back. Shapes keep the sRGB blend, which is what compositing elsewhere does.
+
+## Scaling
+
+`scaled` rounds rather than truncates, and a size is scaled as the distance
+between two scaled edges rather than on its own. Rounding a position and a
+size independently leaves a hairline of background between one pair of
+adjacent boxes and a pixel of overlap between the next — a layout that looks
+very slightly untidy everywhere without anything being identifiably wrong.

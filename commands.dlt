@@ -47,10 +47,32 @@ attach UIDrawList:
         else:
             self.scale_percent = percent
 
+    # Rounded, not truncated. Truncation loses up to a whole pixel on every
+    # value and always in the same direction, so a layout at 125% comes out
+    # steadily tighter than it was laid out to be.
     fun scaled(self, value: i32) -> i32:
         if self.scale_percent == 100:
             return value
-        return (value * self.scale_percent) / 100
+        if value >= 0:
+            return (value * self.scale_percent + 50) / 100
+        return 0 - (((0 - value) * self.scale_percent + 50) / 100)
+
+    # A size, scaled as the distance between two scaled edges rather than on
+    # its own.
+    #
+    # Rounding a position and a size independently is what puts a hairline gap
+    # between two things that were laid out touching, and a pixel of overlap
+    # between the next pair. Deriving the size from the edges means adjacent
+    # boxes land on exactly the same boundary, whatever the scale, because
+    # they are asking the same question about the same number.
+    fun scaled_extent(self, origin: i32, size: i32) -> i32:
+        if self.scale_percent == 100:
+            return size
+        span: i32 = self.scaled(origin + size) - self.scaled(origin)
+        if size > 0:
+            if span < 1:
+                span = 1
+        return span
 
     # Thickness and radius must never round to nothing, or a hairline border
     # disappears at fractional scales instead of getting thinner.
@@ -181,8 +203,8 @@ attach UIDrawList:
         Memory.write_i32(self.kinds + off32, UI_CMD_IMAGE)
         Memory.write_i32(self.xs + off32, self.scaled(x))
         Memory.write_i32(self.ys + off32, self.scaled(y))
-        Memory.write_i32(self.widths + off32, self.scaled(width))
-        Memory.write_i32(self.heights + off32, self.scaled(height))
+        Memory.write_i32(self.widths + off32, self.scaled_extent(x, width))
+        Memory.write_i32(self.heights + off32, self.scaled_extent(y, height))
         Memory.write_i32(self.x2s + off32, src_w)
         Memory.write_i32(self.y2s + off32, src_h)
         Memory.write_i32(self.colors + off32, tint)
@@ -392,13 +414,37 @@ attach UIDrawList:
             if text_offset < 0:
                 self.dropped = self.dropped + 1
                 return
+        # The slots do not all mean the same thing, and scaling them alike is
+        # how a radius becomes a diameter and a direction flag becomes a two.
+        # Positions scale as positions, sizes as the gap between two scaled
+        # edges, radii and spreads as lengths that must not vanish.
+        scaled_width: i32 = self.scaled(width)
+        scaled_height: i32 = self.scaled(height)
+        scaled_x2: i32 = self.scaled(x2)
+        scaled_y2: i32 = self.scaled(y2)
+        if kind == UI_CMD_FILL_RECT or kind == UI_CMD_OUTLINE_RECT or kind == UI_CMD_CLEAR or kind == UI_CMD_CLIP_PUSH:
+            scaled_width = self.scaled_extent(x, width)
+            scaled_height = self.scaled_extent(y, height)
+        elif kind == UI_CMD_FILL_ROUNDED_RECT or kind == UI_CMD_OUTLINE_ROUNDED_RECT or kind == UI_CMD_SHADOW:
+            scaled_width = self.scaled_extent(x, width)
+            scaled_height = self.scaled_extent(y, height)
+            scaled_x2 = self.scaled_at_least_one(x2)
+        elif kind == UI_CMD_GRADIENT:
+            scaled_width = self.scaled_extent(x, width)
+            scaled_height = self.scaled_extent(y, height)
+            scaled_x2 = self.scaled_at_least_one(x2)
+            # A direction, not a length.
+            scaled_y2 = y2
+        elif kind == UI_CMD_FILL_CIRCLE or kind == UI_CMD_OUTLINE_CIRCLE or kind == UI_CMD_ARC:
+            scaled_width = self.scaled_at_least_one(width)
+
         Memory.write_i32(self.kinds + off32, kind)
         Memory.write_i32(self.xs + off32, self.scaled(x))
         Memory.write_i32(self.ys + off32, self.scaled(y))
-        Memory.write_i32(self.widths + off32, self.scaled(width))
-        Memory.write_i32(self.heights + off32, self.scaled(height))
-        Memory.write_i32(self.x2s + off32, self.scaled(x2))
-        Memory.write_i32(self.y2s + off32, self.scaled(y2))
+        Memory.write_i32(self.widths + off32, scaled_width)
+        Memory.write_i32(self.heights + off32, scaled_height)
+        Memory.write_i32(self.x2s + off32, scaled_x2)
+        Memory.write_i32(self.y2s + off32, scaled_y2)
         Memory.write_i32(self.colors + off32, color)
         Memory.write_i32(self.backgrounds + off32, background)
         Memory.write_i32(self.thicknesses + off32, self.scaled_at_least_one(thickness))
