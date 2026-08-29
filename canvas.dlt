@@ -33,6 +33,16 @@ struct DrawCanvas:
     font_stride: i32 = 8
     font_format: i32 = 0
     font_advances: i64 = 0 as i64
+    # Subpixel rendering. A pen that may only stop on whole pixels rounds
+    # every advance, and the errors add up along the line rather than
+    # cancelling: letters sit unevenly and a word measures wrong. With phases
+    # the pen keeps a fraction and picks the glyph rasterised for it.
+    font_phases: i32 = 1
+    font_advances_q8: i64 = 0 as i64
+    font_glyph_ids: i64 = 0 as i64
+    font_kern_keys: i64 = 0 as i64
+    font_kern_values: i64 = 0 as i64
+    font_kern_count: i32 = 0
     clip_x:      i32 = 0
     clip_y:      i32 = 0
     clip_w:      i32 = 0
@@ -200,6 +210,61 @@ attach DrawCanvas:
     # has no glyph for takes NO space: it is a diacritic that belongs on top
     # of the letter before it, so charging it a fallback advance would open a
     # hole in the middle of a word instead of quietly omitting an accent.
+    # Everything the atlas knows beyond a bitmap and a whole-pixel advance.
+    # A setter rather than three more constructor arguments: the existing ones
+    # already run to seventeen.
+    fun set_font_subpixel(self, phases: i32, advances_q8: i64, glyph_ids: i64, kern_keys: i64, kern_values: i64, kern_count: i32):
+        self.font_phases = phases
+        if self.font_phases < 1:
+            self.font_phases = 1
+        self.font_advances_q8 = advances_q8
+        self.font_glyph_ids = glyph_ids
+        self.font_kern_keys = kern_keys
+        self.font_kern_values = kern_values
+        self.font_kern_count = kern_count
+
+    # The advance in 1/256 of a pixel, falling back to the whole-pixel table.
+    fun advance_q8_for(self, codepoint: i32, glyph_index: i32) -> i32:
+        if glyph_index < 0:
+            return self.advance_for(codepoint, glyph_index) * 256
+        if self.font_advances_q8 != 0:
+            if glyph_index < self.font_count + self.font_count2:
+                if unicode_is_arabic_form_mark(codepoint) == 1:
+                    return 0
+                return Memory.read_i32(self.font_advances_q8 + (glyph_index as i64) * 4)
+        return self.advance_for(codepoint, glyph_index) * 256
+
+    fun glyph_id_for(self, glyph_index: i32) -> i32:
+        if self.font_glyph_ids == 0 or glyph_index < 0:
+            return 0
+        if glyph_index >= self.font_count + self.font_count2:
+            return 0
+        return Memory.read_i32(self.font_glyph_ids + (glyph_index as i64) * 4)
+
+    # Binary search of the sorted pair table the face built.
+    fun kern_q8_for(self, left_glyph: i32, right_glyph: i32) -> i32:
+        if self.font_kern_count <= 0:
+            return 0
+        if left_glyph <= 0:
+            return 0
+        if right_glyph <= 0:
+            return 0
+        want: i64 = ((left_glyph as i64) << 32) | (right_glyph as i64)
+        low: i32 = 0
+        high: i32 = self.font_kern_count - 1
+        mid: i32 = 0
+        key: i64 = 0
+        while low <= high:
+            mid = (low + high) / 2
+            key = Memory.read_i64(self.font_kern_keys + (mid as i64) * 8)
+            if key == want:
+                return Memory.read_i32(self.font_kern_values + (mid as i64) * 4)
+            elif key < want:
+                low = mid + 1
+            else:
+                high = mid - 1
+        return 0
+
     fun advance_for(self, codepoint: i32, glyph_index: i32) -> i32:
         # A non-spacing mark takes no width, glyph or no glyph. The Arabic
         # presentation forms carry an advance because that block was designed
@@ -288,17 +353,38 @@ attach DrawCanvas:
             return value
         return self.text_out as str
 
+    # Summed in 1/256 of a pixel and rounded once, over codepoints rather
+    # than bytes. Rounding per glyph is exactly the error the pen avoids, and
+    # a measure that disagreed with the pen would put every centred label and
+    # every caret slightly wrong.
     fun measure_text(self, value: str) -> i32:
+        return (self.measure_text_q8(value) + 128) / 256
+
+    fun measure_text_q8(self, value: str) -> i32:
         shown: str = self.prepare_text(value)
         text_ptr: i64 = shown as i64
         length: i32 = Memory.strlen(shown) as i32
         index: i32 = 0
-        width: i32 = 0
+        width_q8: i32 = 0
+        glyph_index: i32 = 0
+        this_glyph: i32 = 0
+        previous_glyph: i32 = 0
+        advance: i32 = 0
+        decoded: Utf8Char = Utf8Char()
         while index < length:
-            codepoint: i32 = Memory.read_i8(text_ptr + (index as i64)) & 255
-            width = width + self.advance_for(codepoint, self.font_glyph_index(codepoint))
-            index = index + 1
-        return width
+            decoded = utf8_decode(text_ptr, index as i64, length as i64)
+            if decoded.size <= 0:
+                return width_q8
+            glyph_index = self.font_glyph_index(decoded.codepoint)
+            this_glyph = self.glyph_id_for(glyph_index)
+            if previous_glyph > 0:
+                width_q8 = width_q8 + self.kern_q8_for(previous_glyph, this_glyph)
+            advance = self.advance_q8_for(decoded.codepoint, glyph_index)
+            if advance > 0:
+                previous_glyph = this_glyph
+            width_q8 = width_q8 + advance
+            index = index + decoded.size
+        return width_q8
 
     fun is_valid(self) -> i32:
         return self.fb_valid
@@ -622,22 +708,40 @@ attach DrawCanvas:
         ry: i32 = zero
         px: i32 = zero
         py: i32 = zero
+        # The pen keeps 1/256 of a pixel. Rounding each advance to a whole one
+        # would leave the errors to accumulate along the line rather than
+        # cancel, which is uneven letter spacing and a word that measures
+        # wrong -- the two things that make text look hand-placed.
+        pen_q8: i32 = x * 256
         cursor_x: i32 = x
+        phase: i32 = 0
         alpha: i32 = (color >> 24) & 255
         decoded: Utf8Char = Utf8Char()
         # How far back a mark is drawn: over the letter just placed, since
         # the pen has already moved past it.
         mark_back: i32 = 0
         previous_advance: i32 = 0
-        step_width: i32 = 0
+        step_q8: i32 = 0
+        this_glyph: i32 = 0
+        previous_glyph: i32 = 0
         while i < length:
             decoded = utf8_decode(text_ptr, i as i64, length as i64)
             if decoded.size <= zero:
                 return
             ch = decoded.codepoint
             glyph_index = self.font_glyph_index(ch)
+            # Kerning is keyed by the font's own glyph ids, not by codepoints:
+            # two codepoints may share one glyph, and the pair table knows
+            # nothing about Unicode.
+            this_glyph = self.glyph_id_for(glyph_index)
+            if previous_glyph > 0:
+                pen_q8 = pen_q8 + self.kern_q8_for(previous_glyph, this_glyph)
+            phase = zero
+            if pen_q8 >= zero:
+                phase = ((pen_q8 % 256) * self.font_phases) / 256
+            cursor_x = pen_q8 / 256
             if glyph_index >= zero:
-                base = self.font + (glyph_index as i64) * (self.font_stride as i64)
+                base = self.font + (((glyph_index as i64) * (self.font_phases as i64)) + (phase as i64)) * (self.font_stride as i64)
                 ry = zero
                 while ry < self.font_height:
                     if self.font_format == 0:
@@ -660,13 +764,16 @@ attach DrawCanvas:
                                         self.blend_pixel(px, py, color, coverage)
                         rx = rx + 1
                     ry = ry + 1
-            step_width = self.advance_for(ch, glyph_index)
-            if step_width > 0:
-                previous_advance = step_width
+            step_q8 = self.advance_q8_for(ch, glyph_index)
+            if step_q8 > 0:
+                previous_advance = (step_q8 + 128) / 256
                 mark_back = 0
+                previous_glyph = this_glyph
             else:
+                # A mark takes no width and must not break the kerning pair
+                # around it either.
                 mark_back = previous_advance
-            cursor_x = cursor_x + step_width
+            pen_q8 = pen_q8 + step_q8
             i = i + decoded.size
 
     fun text_bg(self, x: i32, y: i32, value: str, color: DrawColor, background: DrawColor):
