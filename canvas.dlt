@@ -149,6 +149,63 @@ fun ui_code_of(light: i32) -> i32:
         value = 65535
     return Memory.read_i32(g_ui_gamma_to_srgb + ((value >> (16 - UI_GAMMA_INVERSE_BITS)) as i64) * 4)
 
+# The hypotenuse of two Q8 lengths, in Q8.
+#
+# Not draw_isqrt_q8: that one takes a whole number and scales the result up by
+# 256, and the sum of two squared Q8 values is already Q16 -- feeding it one
+# gives an answer 256 times too large. Carried in 64 bits because two Q8
+# distances square past the top of 32 well inside an ordinary window.
+fun draw_hypot_q8(ax: i32, ay: i32) -> i32:
+    total: i64 = (ax as i64) * (ax as i64) + (ay as i64) * (ay as i64)
+    if total <= 0:
+        return 0
+    x: i64 = total
+    y: i64 = (x + 1) / 2
+    while y < x:
+        x = y
+        y = (x + total / x) / 2
+    return x as i32
+
+# Signed distance from a point to a rounded rectangle, in 1/256 of a pixel.
+# Negative inside, zero on the edge, positive outside.
+#
+# One function serves both a gradient's edge and a shadow's falloff, which is
+# the reason to have it: a shadow whose corners did not match the box it falls
+# from is worse than no shadow, and two implementations would drift apart.
+fun draw_rounded_distance_q8(px: i32, py: i32, x: i32, y: i32, width: i32, height: i32, radius: i32) -> i32:
+    r: i32 = radius
+    half_w: i32 = width * 128
+    half_h: i32 = height * 128
+    if r * 256 > half_w:
+        r = half_w / 256
+    if r * 256 > half_h:
+        r = half_h / 256
+    centre_x: i32 = x * 256 + half_w
+    centre_y: i32 = y * 256 + half_h
+    dx: i32 = px * 256 + 128 - centre_x
+    if dx < 0:
+        dx = 0 - dx
+    dy: i32 = py * 256 + 128 - centre_y
+    if dy < 0:
+        dy = 0 - dy
+    qx: i32 = dx - (half_w - r * 256)
+    qy: i32 = dy - (half_h - r * 256)
+    outer_x: i32 = qx
+    if outer_x < 0:
+        outer_x = 0
+    outer_y: i32 = qy
+    if outer_y < 0:
+        outer_y = 0
+    outside: i32 = 0
+    if outer_x > 0 or outer_y > 0:
+        outside = draw_hypot_q8(outer_x, outer_y)
+    inside: i32 = qx
+    if qy > inside:
+        inside = qy
+    if inside > 0:
+        inside = 0
+    return outside + inside - r * 256
+
 fun draw_canvas_empty() -> DrawCanvas:
     return DrawCanvas()
 
@@ -1233,6 +1290,116 @@ attach DrawCanvas:
                         self.blend_pixel(cx + xx, cy + yy, color, coverage)
                 xx = xx + 1
             yy = yy + 1
+
+    # ----- Gradient (rounded) -----
+    #
+    # Interpolated in light rather than in code, for the same reason glyph
+    # coverage is: mixing two sRGB numbers half and half does not give the
+    # colour halfway between them in brightness, and a ramp made that way has
+    # a visible dip through its middle.
+    fun fill_gradient_rounded(self, x: i32, y: i32, width: i32, height: i32, radius: i32, from_color: DrawColor, to_color: DrawColor, vertical: i32):
+        if self.fb_valid == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+        span: i32 = height
+        if vertical == 0:
+            span = width
+        if span <= 1:
+            span = 1
+        alpha_from: i32 = (from_color >> 24) & 255
+        alpha_to: i32 = (to_color >> 24) & 255
+        ready: i32 = ui_gamma_ready()
+
+        py: i32 = y
+        px: i32 = x
+        mix: i32 = 0
+        distance: i32 = 0
+        coverage: i32 = 0
+        colour: DrawColor = 0
+        red: i32 = 0
+        green: i32 = 0
+        blue: i32 = 0
+        alpha: i32 = 0
+        while py < y + height:
+            px = x
+            while px < x + width:
+                if vertical == 1:
+                    mix = ((py - y) * 255) / span
+                else:
+                    mix = ((px - x) * 255) / span
+                if mix > 255:
+                    mix = 255
+                if ready == 1:
+                    blue = ui_code_of((ui_light_of(from_color & 255) * (255 - mix) + ui_light_of(to_color & 255) * mix) / 255)
+                    green = ui_code_of((ui_light_of((from_color >> 8) & 255) * (255 - mix) + ui_light_of((to_color >> 8) & 255) * mix) / 255)
+                    red = ui_code_of((ui_light_of((from_color >> 16) & 255) * (255 - mix) + ui_light_of((to_color >> 16) & 255) * mix) / 255)
+                else:
+                    blue = ((from_color & 255) * (255 - mix) + (to_color & 255) * mix) / 255
+                    green = (((from_color >> 8) & 255) * (255 - mix) + ((to_color >> 8) & 255) * mix) / 255
+                    red = (((from_color >> 16) & 255) * (255 - mix) + ((to_color >> 16) & 255) * mix) / 255
+                alpha = (alpha_from * (255 - mix) + alpha_to * mix) / 255
+                colour = (blue & 255) | ((green & 255) << 8) | ((red & 255) << 16) | ((alpha & 255) << 24)
+                distance = draw_rounded_distance_q8(px, py, x, y, width, height, radius)
+                # Half a pixel either side of the edge is the whole of the
+                # antialiasing: inside is solid, outside is nothing.
+                coverage = 128 - distance
+                if coverage > 255:
+                    coverage = 255
+                if coverage > 0:
+                    self.blend_pixel(px, py, colour, coverage)
+                px = px + 1
+            py = py + 1
+
+    # ----- Drop shadow -----
+    #
+    # Not a blurred copy of anything: the same rounded distance, faded out
+    # across the blur. A real Gaussian would cost a second buffer and two
+    # passes to arrive somewhere the eye cannot tell apart from a smooth
+    # falloff, and the falloff is squared so the near edge stays dense while
+    # the far one thins -- which is what a soft shadow actually looks like.
+    fun drop_shadow(self, x: i32, y: i32, width: i32, height: i32, radius: i32, blur: i32, spread: i32, color: DrawColor):
+        if self.fb_valid == 0:
+            return
+        if width <= 0 or height <= 0:
+            return
+        softness: i32 = blur
+        if softness < 1:
+            softness = 1
+        grown_x: i32 = x - spread
+        grown_y: i32 = y - spread
+        grown_w: i32 = width + spread * 2
+        grown_h: i32 = height + spread * 2
+        if grown_w <= 0 or grown_h <= 0:
+            return
+        grown_r: i32 = radius + spread
+        if grown_r < 0:
+            grown_r = 0
+        source_alpha: i32 = (color >> 24) & 255
+        if source_alpha <= 0:
+            return
+
+        py: i32 = grown_y - softness
+        px: i32 = 0
+        distance: i32 = 0
+        fade: i32 = 0
+        alpha: i32 = 0
+        reach: i32 = softness * 256
+        while py <= grown_y + grown_h + softness:
+            px = grown_x - softness
+            while px <= grown_x + grown_w + softness:
+                distance = draw_rounded_distance_q8(px, py, grown_x, grown_y, grown_w, grown_h, grown_r)
+                if distance <= 0:
+                    alpha = source_alpha
+                elif distance < reach:
+                    fade = 255 - (distance * 255) / reach
+                    alpha = (source_alpha * fade * fade) / 65025
+                else:
+                    alpha = 0
+                if alpha > 0:
+                    self.blend_pixel(px, py, color, alpha)
+                px = px + 1
+            py = py + 1
 
     fun fill_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: DrawColor):
         if self.fb_valid == 0:

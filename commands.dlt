@@ -226,6 +226,16 @@ attach UIDrawList:
         packed: i32 = (start_deg & 65535) | ((end_deg & 65535) << 16)
         self.write_command(UI_CMD_ARC, cx, cy, radius, 0, 0, 0, color, packed, thickness, "")
 
+    # Two colours, so the second rides in the background slot.
+    fun push_gradient(self, x: i32, y: i32, width: i32, height: i32, radius: i32, from_color: UIColor, to_color: UIColor, vertical: i32):
+        self.write_command(UI_CMD_GRADIENT, x, y, width, height, radius, vertical, from_color, to_color, 0, "")
+
+    # The blur travels as a thickness so it never rounds to nothing: a shadow
+    # that lost its softness at a fractional display scale would turn into a
+    # hard black outline, which is worse than having none.
+    fun push_shadow(self, x: i32, y: i32, width: i32, height: i32, radius: i32, blur: i32, spread: i32, color: UIColor):
+        self.write_command(UI_CMD_SHADOW, x, y, width, height, radius, spread, color, 0, blur, "")
+
     fun push_fill_rounded_rect(self, x: i32, y: i32, width: i32, height: i32, radius: i32, color: UIColor):
         self.write_command(UI_CMD_FILL_ROUNDED_RECT, x, y, width, height, radius, 0, color, 0, 0, "")
 
@@ -345,6 +355,10 @@ attach UIDrawList:
                 canvas.fill_circle(x, y, width, color)
             elif kind == UI_CMD_OUTLINE_CIRCLE:
                 canvas.outline_circle(x, y, width, color, thickness)
+            elif kind == UI_CMD_GRADIENT:
+                canvas.fill_gradient_rounded(x, y, width, height, x2, color, background, y2)
+            elif kind == UI_CMD_SHADOW:
+                canvas.drop_shadow(x, y, width, height, x2, thickness, y2, color)
             elif kind == UI_CMD_FILL_TRIANGLE:
                 canvas.fill_triangle(x, y, width, height, x2, y2, color)
             elif kind == UI_CMD_ARC:
