@@ -59,6 +59,9 @@ export UI_CMD_CLIP_POP
 export UI_CMD_FILL_TRIANGLE
 export UI_CMD_ARC
 export ui_unpack_angle
+export ui_gamma_ready
+export ui_light_of
+export ui_code_of
 export draw_sin_q10
 export draw_cos_q10
 export UI_CMD_IMAGE

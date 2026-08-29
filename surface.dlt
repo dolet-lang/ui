@@ -376,6 +376,8 @@ attach UISurface:
         self.valid = 0
 
 fun ui_surface_create(width: i32, height: i32) -> UISurface:
+    # Built once and shared; see the gamma tables in canvas.
+    ui_gamma_ready()
     return UISurface.create(width, height)
 
 fun ui_surface_wrap(pixels: i64, width: i32, height: i32, pitch: i32) -> UISurface:

@@ -74,6 +74,81 @@ fun draw_sin_q10(degrees: i32) -> i32:
 fun draw_cos_q10(degrees: i32) -> i32:
     return draw_sin_q10(degrees + 90)
 
+# ============================
+#  Gamma
+# ============================
+# An sRGB byte is not a quantity of light; it is a perceptual code for one.
+# Blending a glyph's coverage straight onto those bytes therefore does
+# arithmetic on the wrong numbers, and the error is not symmetric: at half
+# coverage, white on black lands at code 128, which is about a fifth of the
+# light of white -- so light text on a dark ground comes out thin and grey,
+# while the same glyph dark-on-light comes out heavy.
+#
+# Converting to light, mixing there, and converting back puts half coverage at
+# half the light, which is what the eye was promised. It is done for glyph
+# coverage only: shapes keep the sRGB blend, which is what compositing
+# elsewhere does and what their edges are drawn to match.
+#
+# The tables are built once and shared. Sixteen thousand powf calls at
+# startup cost less than a frame, and every text pixel afterwards is two
+# lookups instead of a transcendental.
+
+UI_GAMMA_INVERSE_BITS: i32 = 14
+
+g_ui_gamma_to_linear: i64 = 0
+g_ui_gamma_to_srgb: i64 = 0
+
+fun ui_gamma_ready() -> i32:
+    if g_ui_gamma_to_linear != 0:
+        return 1
+    forward: i64 = Memory.malloc_zeroed(256 * 4)
+    if forward == 0:
+        return 0
+    inverse_count: i32 = 1 << UI_GAMMA_INVERSE_BITS
+    inverse: i64 = Memory.malloc_zeroed((inverse_count as i64) * 4)
+    if inverse == 0:
+        Memory.free(forward)
+        return 0
+
+    i: i32 = 0
+    coded: f32 = 0.0
+    light: f32 = 0.0
+    while i < 256:
+        coded = (i as f32) / 255.0
+        if coded <= 0.04045:
+            light = coded / 12.92
+        else:
+            light = powf((coded + 0.055) / 1.055, 2.4)
+        Memory.write_i32(forward + (i as i64) * 4, (light * 65535.0 + 0.5) as i32)
+        i = i + 1
+
+    i = 0
+    while i < inverse_count:
+        light = (i as f32) / ((inverse_count - 1) as f32)
+        if light <= 0.0031308:
+            coded = light * 12.92
+        else:
+            coded = 1.055 * powf(light, 1.0 / 2.4) - 0.055
+        Memory.write_i32(inverse + (i as i64) * 4, (coded * 255.0 + 0.5) as i32)
+        i = i + 1
+
+    g_ui_gamma_to_linear = forward
+    g_ui_gamma_to_srgb = inverse
+    return 1
+
+# An sRGB byte as light, in 1/65535.
+fun ui_light_of(value: i32) -> i32:
+    return Memory.read_i32(g_ui_gamma_to_linear + ((value & 255) as i64) * 4)
+
+# Light back to an sRGB byte.
+fun ui_code_of(light: i32) -> i32:
+    value: i32 = light
+    if value < 0:
+        value = 0
+    if value > 65535:
+        value = 65535
+    return Memory.read_i32(g_ui_gamma_to_srgb + ((value >> (16 - UI_GAMMA_INVERSE_BITS)) as i64) * 4)
+
 fun draw_canvas_empty() -> DrawCanvas:
     return DrawCanvas()
 
@@ -435,6 +510,49 @@ attach DrawCanvas:
         ored: i32 = (sr * effective_alpha + dr * inv) / 255
         Memory.write_i32(addr, (ob & 255) | ((og & 255) << 8) | ((ored & 255) << 16) | (255 << 24))
 
+    # Coverage blended in light rather than in code. Same guards as
+    # blend_pixel, written out rather than shared: this is the innermost loop
+    # of every string on screen, and a flag tested per pixel to choose between
+    # two blends would cost more than the twenty lines it saved.
+    fun blend_glyph_pixel(self, x: i32, y: i32, color: DrawColor, coverage: i32):
+        if self.fb_valid == 0:
+            return
+        zero: i32 = self.fb_valid - self.fb_valid
+        if x < zero:
+            return
+        if y < zero:
+            return
+        if x >= self.width:
+            return
+        if y >= self.height:
+            return
+        if self.clip_active == 1:
+            if x < self.clip_x:
+                return
+            if y < self.clip_y:
+                return
+            if x >= self.clip_x + self.clip_w:
+                return
+            if y >= self.clip_y + self.clip_h:
+                return
+        source_alpha: i32 = (color >> 24) & 255
+        effective: i32 = (coverage * source_alpha) / 255
+        if effective <= zero:
+            return
+        addr: i64 = self.fb_data + (y as i64) * (self.fb_pitch as i64) + (x as i64) * 4
+        if effective >= 255:
+            Memory.write_i32(addr, color)
+            return
+        if g_ui_gamma_to_linear == 0:
+            self.blend_pixel(x, y, color, coverage)
+            return
+        dst: i32 = Memory.read_i32(addr)
+        inv: i32 = 255 - effective
+        ob: i32 = ui_code_of((ui_light_of(color & 255) * effective + ui_light_of(dst & 255) * inv) / 255)
+        og: i32 = ui_code_of((ui_light_of((color >> 8) & 255) * effective + ui_light_of((dst >> 8) & 255) * inv) / 255)
+        ored: i32 = ui_code_of((ui_light_of((color >> 16) & 255) * effective + ui_light_of((dst >> 16) & 255) * inv) / 255)
+        Memory.write_i32(addr, (ob & 255) | ((og & 255) << 8) | ((ored & 255) << 16) | (255 << 24))
+
     fun end(self):
         # Kept as a harmless frame-boundary marker for callers migrating
         # from ui 0.6. Presentation belongs to eqoi or another host.
@@ -761,7 +879,7 @@ attach DrawCanvas:
                                     if alpha >= 255 and coverage >= 255:
                                         Memory.write_i32(self.fb_data + (py as i64) * (self.fb_pitch as i64) + (px as i64) * 4, color)
                                     else:
-                                        self.blend_pixel(px, py, color, coverage)
+                                        self.blend_glyph_pixel(px, py, color, coverage)
                         rx = rx + 1
                     ry = ry + 1
             step_q8 = self.advance_q8_for(ch, glyph_index)
